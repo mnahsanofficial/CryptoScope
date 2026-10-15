@@ -5,10 +5,13 @@
  *   npm run scan -- github.com example.com:8443
  *   npm run scan -- --json google.com         # full JSON output
  */
+import { RiskEngine } from '../risk/risk-engine';
 import { SEED_TARGETS } from '../scanner/seed-targets';
 import { formatTarget } from '../scanner/scan-target';
 import { ScanOutcome } from '../scanner/scanner.types';
 import { TlsScannerService } from '../scanner/tls-scanner.service';
+
+const riskEngine = new RiskEngine();
 
 function toRow(outcome: ScanOutcome): Record<string, string> {
   const target = formatTarget(outcome.target);
@@ -17,9 +20,11 @@ function toRow(outcome: ScanOutcome): Record<string, string> {
   }
   const { tls, certificate: cert, trust } = outcome.result;
   const key = cert.publicKey;
+  const risk = riskEngine.assess(outcome.result);
   return {
     target,
     status: 'ok',
+    risk: `${risk.score} ${risk.level}`,
     protocol: tls.protocol,
     cipher: tls.cipher.name,
     key: `${key.algorithm}${key.curve ? ` ${key.curve}` : ''}${key.size ? ` ${key.size}` : ''}`,
@@ -28,6 +33,18 @@ function toRow(outcome: ScanOutcome): Record<string, string> {
     trust: trust.authorized ? 'trusted' : (trust.error ?? 'untrusted'),
     'pq-kex': tls.postQuantumKeyExchange === null ? '?' : tls.postQuantumKeyExchange ? 'yes' : 'no',
   };
+}
+
+function printFindings(outcomes: ScanOutcome[]): void {
+  for (const outcome of outcomes) {
+    if (outcome.status !== 'success') continue;
+    const { findings } = riskEngine.assess(outcome.result);
+    if (findings.length === 0) continue;
+    console.log(`\n${formatTarget(outcome.target)}`);
+    for (const f of findings) {
+      console.log(`  [${f.severity.toUpperCase()}] ${f.title}: ${f.description}`);
+    }
+  }
 }
 
 async function main(): Promise<void> {
@@ -40,9 +57,11 @@ async function main(): Promise<void> {
   const outcomes = await scanner.scanMany(targets);
 
   if (json) {
-    console.log(JSON.stringify(outcomes, null, 2));
+    const assessed = outcomes.map((o) => (o.status === 'success' ? { ...o, risk: riskEngine.assess(o.result) } : o));
+    console.log(JSON.stringify(assessed, null, 2));
   } else {
     console.table(outcomes.map(toRow));
+    printFindings(outcomes);
   }
 
   const failed = outcomes.filter((o) => o.status === 'failed').length;
