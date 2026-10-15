@@ -1,66 +1,14 @@
 /**
- * End-to-end tests: the real Nest app + real PostgreSQL (with migrations) + a real local TLS server.
- * Needs the Docker stack running (Postgres, Redis, Elasticsearch):  npm run test:e2e
+ * End-to-end tests: the real Nest app + real PostgreSQL (with migrations) + Redis/BullMQ worker
+ * + a real local TLS server. Needs the Docker stack running:  npm run test:e2e
  *
- * Uses a separate database (cryptoscope_test) so it never touches seeded or real data.
+ * Uses a separate database, queue prefix and index (see helpers.ts), so it never touches dev data.
  */
 import { INestApplication } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
-import { config as loadDotenv } from 'dotenv';
-import { readFileSync } from 'node:fs';
-import { AddressInfo, createServer } from 'node:net';
-import { join } from 'node:path';
-import * as tls from 'node:tls';
-import { Client } from 'pg';
 import request from 'supertest';
+import * as tls from 'node:tls';
 import { DataSource } from 'typeorm';
-
-const TEST_DB = 'cryptoscope_test';
-
-loadDotenv({ path: [join(__dirname, '../.env'), join(__dirname, '../../.env')], quiet: true });
-
-/** Creates the test database if needed (CREATE DATABASE can't use IF NOT EXISTS). */
-async function ensureTestDatabase(): Promise<void> {
-  const admin = new Client({
-    host: process.env.POSTGRES_HOST,
-    port: Number(process.env.POSTGRES_PORT),
-    user: process.env.POSTGRES_USER,
-    password: process.env.POSTGRES_PASSWORD,
-    database: 'postgres',
-  });
-  await admin.connect();
-  try {
-    const { rowCount } = await admin.query('SELECT 1 FROM pg_database WHERE datname = $1', [TEST_DB]);
-    if (!rowCount) await admin.query(`CREATE DATABASE ${TEST_DB}`);
-  } finally {
-    await admin.end();
-  }
-}
-
-/** Local TLS server with the self-signed RSA-2048 test certificate and classical-only key exchange. */
-async function startTlsServer(): Promise<{ port: number; server: tls.Server }> {
-  const fixtures = join(__dirname, '../src/scanner/__fixtures__');
-  const server = tls.createServer(
-    {
-      key: readFileSync(join(fixtures, 'rsa2048-sha256.key')),
-      cert: readFileSync(join(fixtures, 'rsa2048-sha256.crt')),
-      ecdhCurve: 'X25519', // no hybrid PQ group -> NO_PQ_KEY_EXCHANGE finding
-    },
-    (socket) => socket.end(),
-  );
-  server.on('tlsClientError', () => undefined);
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  return { port: (server.address() as AddressInfo).port, server };
-}
-
-/** A port with nothing listening on it. */
-async function closedPort(): Promise<number> {
-  const server = createServer();
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = server.address() as AddressInfo;
-  await new Promise((resolve) => server.close(resolve));
-  return port;
-}
+import { bootTestApp, cleanUpTestQueue, closedPort, scanAndWait, startTlsServer } from './helpers';
 
 describe('CryptoScope API (e2e)', () => {
   let app: INestApplication;
@@ -69,23 +17,12 @@ describe('CryptoScope API (e2e)', () => {
   let tlsPort: number;
 
   beforeAll(async () => {
-    await ensureTestDatabase();
-    process.env.POSTGRES_DB = TEST_DB; // must be set before AppModule reads its config
-    process.env.SCAN_TIMEOUT_MS = '2000';
-
     ({ server: tlsServer, port: tlsPort } = await startTlsServer());
-
-    // Imported after the env is set, because the config is loaded when the module is evaluated.
-    const { AppModule } = await import('../src/app.module');
-    const { configureApp } = await import('../src/app.setup');
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication({ logger: false });
-    configureApp(app);
-    await app.init(); // runs migrations (migrationsRun: true)
-    db = app.get(DataSource);
+    ({ app, db } = await bootTestApp()); // runs migrations (migrationsRun: true) and starts the worker
   });
 
   afterAll(async () => {
+    if (app) await cleanUpTestQueue(app);
     await app?.close();
     await new Promise((resolve) => tlsServer?.close(resolve));
   });
@@ -140,8 +77,9 @@ describe('CryptoScope API (e2e)', () => {
     it('scans an asset and stores scan, certificate, findings and the latest risk', async () => {
       const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
 
-      const scan = (await api().post(`/api/assets/${asset.id}/scans`).expect(201)).body;
+      const { job, scan } = await scanAndWait(app, asset.id);
 
+      expect(job.state).toBe('completed');
       expect(scan).toMatchObject({ status: 'success', protocol: 'TLSv1.3', riskScore: 30, riskLevel: 'medium' });
       expect(scan.certificate).toMatchObject({ keyAlgorithm: 'RSA', keySize: 2048, selfSigned: true });
       expect(scan.findings.map((f: { ruleId: string }) => f.ruleId).sort()).toEqual(
@@ -155,8 +93,8 @@ describe('CryptoScope API (e2e)', () => {
     it('stores a certificate once even when it is seen in many scans', async () => {
       const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
 
-      await api().post(`/api/assets/${asset.id}/scans`).expect(201);
-      await api().post(`/api/assets/${asset.id}/scans`).expect(201);
+      await scanAndWait(app, asset.id);
+      await scanAndWait(app, asset.id);
 
       const [{ scans, certificates }] = await db.query(
         'SELECT (SELECT COUNT(*)::int FROM scans) AS scans, (SELECT COUNT(*)::int FROM certificates) AS certificates',
@@ -169,12 +107,14 @@ describe('CryptoScope API (e2e)', () => {
 
     it('records a failed scan without changing the last known risk', async () => {
       const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
-      await api().post(`/api/assets/${asset.id}/scans`).expect(201);
+      await scanAndWait(app, asset.id);
 
       // Point the asset at a port where nothing listens, so the next scan is refused
       await api().patch(`/api/assets/${asset.id}`).send({ port: await closedPort() }).expect(200);
-      const failed = (await api().post(`/api/assets/${asset.id}/scans`).expect(201)).body;
+      const { job, scan: failed } = await scanAndWait(app, asset.id);
 
+      // "Refused" may be temporary, so the worker retried before saving it as a failed scan
+      expect(job).toMatchObject({ state: 'completed', attemptsMade: 3 });
       expect(failed).toMatchObject({ status: 'failed', errorCode: 'CONNECTION_REFUSED', riskScore: null, findings: [] });
       const refreshed = (await api().get(`/api/assets/${asset.id}`).expect(200)).body;
       expect(refreshed.latestRiskScore).toBe(30);
@@ -191,7 +131,7 @@ describe('CryptoScope API (e2e)', () => {
     beforeEach(async () => {
       const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
       assetId = asset.id;
-      await api().post(`/api/assets/${assetId}/scans`).expect(201);
+      await scanAndWait(app, assetId);
     });
 
     it('filters by category and includes the asset host', async () => {
