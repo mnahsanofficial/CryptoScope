@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Roles } from '../auth/decorators';
 import { RiskEngine } from '../risk/risk-engine';
 import { RiskAssessment, RiskLevel } from '../risk/risk.types';
 import { ScanRequestDto } from './dto/scan-request.dto';
@@ -40,6 +41,7 @@ export class ScannerController {
   // POST /api/scanner/scan  { "targets": ["github.com", ...] }
   // Synchronous for now; Step 6 moves scanning to a BullMQ background job.
   @Post('scan')
+  @Roles('admin') // connects to arbitrary hosts: admin only, and SSRF-protected in the scanner
   @HttpCode(200)
   async scan(@Body() body: ScanRequestDto): Promise<ScanResponse> {
     const started = Date.now();

@@ -1,14 +1,22 @@
 /**
  * Prints live scan progress from the Socket.IO namespace /scans.
  *
- *   npm run scans:watch                              # http://localhost:3001
- *   npm run scans:watch -- http://localhost:3002
+ *   CRYPTOSCOPE_TOKEN=<jwt> npm run scans:watch      # http://localhost:3001
+ *   CRYPTOSCOPE_TOKEN=<jwt> npm run scans:watch -- http://localhost:3002
+ *
+ * Get a token with:  curl -s -X POST localhost:3001/api/auth/login -H 'content-type: application/json' \
+ *                      -d '{"email":"...","password":"..."}'
  */
 import { io } from 'socket.io-client';
 import { BatchProgress, ScanProgress } from '../scan-jobs/scan-job.types';
 
 const url = process.argv[2] ?? 'http://localhost:3001';
-const socket = io(`${url}/scans`, { transports: ['websocket'] });
+const token = process.env.CRYPTOSCOPE_TOKEN;
+if (!token) {
+  console.error('Set CRYPTOSCOPE_TOKEN to a JWT from POST /api/auth/login');
+  process.exit(1);
+}
+const socket = io(`${url}/scans`, { transports: ['websocket'], auth: { token } });
 
 const time = () => new Date().toISOString().slice(11, 19);
 const bar = (percent: number) => `[${'#'.repeat(Math.round(percent / 10)).padEnd(10, '.')}] ${String(percent).padStart(3)}%`;

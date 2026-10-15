@@ -5,9 +5,10 @@ import { AppConfig } from '../config/configuration';
 import { Finding } from '../findings/finding.entity';
 import { Certificate } from '../scans/certificate.entity';
 import { Scan } from '../scans/scan.entity';
+import { User } from '../users/user.entity';
 import { SnakeNamingStrategy } from './snake-naming.strategy';
 
-export const ENTITIES = [Asset, Scan, Certificate, Finding];
+export const ENTITIES = [Asset, Scan, Certificate, Finding, User];
 
 /** Shared by the Nest app, the TypeORM CLI (migrations) and the seed script. */
 export function buildTypeOrmOptions(db: AppConfig['database']): DataSourceOptions {
