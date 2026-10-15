@@ -10,7 +10,7 @@ quantum attacks), and shows it all on a dashboard.
 
 | Layer          | Technology                                 |
 | -------------- | ------------------------------------------ |
-| Backend API    | NestJS 11 (TypeScript), TypeORM            |
+| Backend API    | NestJS 11 (TypeScript), TypeORM, Node.js 24 in Docker (for ML-DSA) |
 | Frontend       | Next.js 16 (React 19), Tailwind CSS 4      |
 | Database       | PostgreSQL 17                              |
 | Search / logs  | Elasticsearch 8.19 + Kibana                |
@@ -224,6 +224,21 @@ Design notes (token storage trade-offs, data flow, charts, CSP): [docs/dashboard
 | **Assets** | **Findings** |
 | ![Assets table sorted by risk](docs/screenshots/assets.jpg) | ![Findings filtered to critical and high](docs/screenshots/findings.jpg) |
 
+## Crypto-agility (RSA → ECDSA → ML-DSA without code changes)
+
+Application code signs through one `CryptoProvider` interface. The algorithm for new signatures is configuration:
+
+```bash
+CRYPTO_SIGNATURE_ALGORITHM=ECDSA-P256-SHA256   # or RSA-PSS-3072-SHA256, ML-DSA-65, HYBRID-ECDSA-P256+ML-DSA-65
+```
+
+- Providers: **RSA-PSS-3072**, **ECDSA P-256**, **ML-DSA-65** (FIPS 204, post-quantum, real on Node.js 24) and a
+  **hybrid ECDSA + ML-DSA** composite where both signatures must verify.
+- Every signature names its algorithm, so after switching to ML-DSA, old ECDSA signatures still verify (verified in Docker).
+- `GET /api/crypto/providers` compares them live: ML-DSA-65 signatures are 3,309 bytes vs 71 for ECDSA.
+
+How ML-DSA plugs in, hybrid signatures, and the size/speed trade-offs: [docs/crypto-agility.md](docs/crypto-agility.md).
+
 ## Security
 
 - **JWT authentication**, secure by default: every route needs a token unless marked `@Public()`.
@@ -306,6 +321,9 @@ All endpoints except login and health need `Authorization: Bearer <token>`. 🔒
 | GET    | `/api/analytics/handshakes/search` | Log search: `q` (full-text on user agent), `tlsVersion`, `host`, `page`, `pageSize`. |
 | GET    | `/api/dashboard/overview` | Totals, average risk, current findings by severity, % quantum-vulnerable assets, expiring/expired certificates. |
 | GET    | `/api/certificates/expiring` | Certificates in use that expire within `days` (default 30); `includeExpired` (default true); most urgent first. |
+| GET    | `/api/crypto/providers` | Signature algorithms: family, quantum-safe, available, active, measured key/signature sizes and speed. |
+| POST   | `/api/crypto/sign`  | 🔒 `{ message, algorithm? }` → `{ algorithm, keyId, signature, publicKey, quantumSafe }` (active algorithm unless overridden). |
+| POST   | `/api/crypto/verify` | `{ message, algorithm, signature, keyId \| publicKey }` → `{ valid }`. Uses the algorithm named in the signature. |
 | GET    | `/api/findings`     | List findings. Filters: `severity`, `category`, `ruleId` (comma lists), `assetId`, `from`, `to`, `latestOnly` (current findings only). Sort: `createdAt`, `severity`. Paginated. |
 
 ## Roadmap
@@ -318,6 +336,6 @@ All endpoints except login and health need `Authorization: Bearer <token>`. 🔒
 - [x] Step 6 – Async pipeline (BullMQ) + real-time (Socket.IO)
 - [x] Step 7 – Security (JWT, roles, validation, rate limiting)
 - [x] Step 8 – Dashboard
-- [ ] Step 9 – Crypto-agility module
+- [x] Step 9 – Crypto-agility module
 - [ ] Step 10 – Final polish
 
