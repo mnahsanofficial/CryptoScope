@@ -168,7 +168,7 @@ function generateAsset(index: number, now: Date, batch: Batch): void {
   let certId = random.uuid();
   batch.certificates.push({ id: certId, ...toCertificateRow(cert) });
 
-  let latest: { score: number; level: Asset['latestRiskLevel']; at: Date } | null = null;
+  let latest: { score: number; level: Asset['latestRiskLevel'] } | null = null;
   let lastScannedAt = firstScanAt;
 
   for (let i = 0; i < SCANS_PER_ASSET; i++) {
@@ -194,7 +194,7 @@ function generateAsset(index: number, now: Date, batch: Batch): void {
     const risk = riskEngine.assess(result, scannedAt);
     batch.scans.push(toSuccessfulScanRow({ id: scanId, assetId, scannedAt, durationMs, certificateId: certId }, result, risk));
     batch.findings.push(...toFindingRows({ scanId, assetId }, risk, scannedAt, () => random.uuid()));
-    latest = { score: risk.score, level: risk.level, at: scannedAt };
+    latest = { score: risk.score, level: risk.level };
   }
 
   batch.assets.push({
@@ -205,6 +205,7 @@ function generateAsset(index: number, now: Date, batch: Batch): void {
     environment: random.weighted<Environment>([['production', 70], ['staging', 20], ['development', 10]]),
     latestRiskScore: latest?.score ?? null,
     latestRiskLevel: latest?.level ?? null,
+    latestScanId: null, // set after the scans are inserted (the foreign key needs them to exist)
     lastScannedAt,
     createdAt: new Date(firstScanAt.getTime() - DAY_MS),
   });
@@ -255,6 +256,13 @@ async function main(): Promise<void> {
     totals.findings += batch.findings.length;
     process.stdout.write(`\r  ${totals.assets}/${assetCount} assets`);
   }
+
+  // Link each asset to its newest successful scan (same SQL as the AddAssetLatestScan migration).
+  await dataSource.query(`
+    UPDATE assets a SET latest_scan_id = latest.id
+    FROM (SELECT DISTINCT ON (asset_id) asset_id, id FROM scans WHERE status = 'success'
+          ORDER BY asset_id, scanned_at DESC) latest
+    WHERE latest.asset_id = a.id`);
 
   // Refresh planner statistics (and the visibility map, which enables index-only scans).
   console.log('\n  VACUUM ANALYZE ...');

@@ -43,6 +43,9 @@ export class FindingsService {
     if (query.assetId) qb.andWhere('finding.assetId = :assetId', { assetId: query.assetId });
     if (query.from) qb.andWhere('finding.createdAt >= :from', { from: query.from });
     if (query.to) qb.andWhere('finding.createdAt < :to', { to: query.to });
+    if (query.latestOnly) {
+      qb.andWhere('EXISTS (SELECT 1 FROM assets current WHERE current.latest_scan_id = finding.scan_id)');
+    }
     return qb;
   }
 

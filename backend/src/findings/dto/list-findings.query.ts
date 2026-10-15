@@ -1,4 +1,5 @@
-import { IsIn, IsISO8601, IsOptional, IsUUID } from 'class-validator';
+import { IsBoolean, IsIn, IsISO8601, IsOptional, IsUUID } from 'class-validator';
+import { BooleanFromQuery } from '../../dashboard/dashboard.dto';
 import { CommaSeparated, PaginationQueryDto } from '../../common/pagination';
 import { RULES } from '../../risk/rules';
 import { FINDING_CATEGORIES, FindingCategory, RuleId, SEVERITIES, Severity } from '../../risk/risk.types';
@@ -38,6 +39,12 @@ export class ListFindingsQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsISO8601({ strict: true })
   to?: string;
+
+  /** Only findings from each asset's latest successful scan (the "current" state, no history). */
+  @IsOptional()
+  @BooleanFromQuery()
+  @IsBoolean()
+  latestOnly: boolean = false;
 
   @IsOptional()
   @IsIn(FINDING_SORT_FIELDS)

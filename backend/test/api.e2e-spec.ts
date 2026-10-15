@@ -125,6 +125,56 @@ describe('CryptoScope API (e2e)', () => {
     });
   });
 
+  describe('dashboard', () => {
+    it('summarises the current state from each asset\'s latest scan', async () => {
+      const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
+      await createAsset({ host: 'never-scanned.example' });
+      await scanAndWait(app, tokens.admin, asset.id);
+      await scanAndWait(app, tokens.admin, asset.id); // history must not be double counted
+
+      const { body } = await api().get('/api/dashboard/overview').expect(200);
+
+      expect(body).toMatchObject({
+        totalAssets: 2,
+        scannedAssets: 1,
+        averageRiskScore: 30,
+        assetsByRiskLevel: { medium: 1, critical: 0 },
+        currentFindingsBySeverity: { medium: 3, critical: 0 }, // 3, not 6
+        quantumVulnerableAssets: 1,
+        quantumVulnerablePercentage: 100,
+        expiredCertificates: 0,
+      });
+    });
+
+    it('lists certificates in use that expire soon, most urgent first', async () => {
+      const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
+      await scanAndWait(app, tokens.admin, asset.id);
+      // The test certificate is valid for 10 years; pretend it expires in 5 days.
+      await db.query(`UPDATE certificates SET valid_to = now() + interval '5 days 1 hour'`);
+
+      const soon = await api().get('/api/certificates/expiring?days=30').expect(200);
+      expect(soon.body.meta.total).toBe(1);
+      expect(soon.body.data[0]).toMatchObject({ host: '127.0.0.1', keyAlgorithm: 'RSA', keySize: 2048, daysLeft: 5 });
+
+      const narrow = await api().get('/api/certificates/expiring?days=3').expect(200);
+      expect(narrow.body.meta.total).toBe(0);
+
+      await api().get('/api/certificates/expiring?days=1000').expect(400);
+    });
+
+    it('findings?latestOnly=true returns only the current findings', async () => {
+      const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
+      await scanAndWait(app, tokens.admin, asset.id);
+      await scanAndWait(app, tokens.admin, asset.id);
+
+      const all = await api().get('/api/findings').expect(200);
+      const current = await api().get('/api/findings?latestOnly=true').expect(200);
+
+      expect(all.body.meta.total).toBe(6);
+      expect(current.body.meta.total).toBe(3);
+    });
+  });
+
   describe('findings', () => {
     let assetId: string;
 

@@ -86,6 +86,7 @@ overrides them with service names (`postgres`, `redis`, `elasticsearch`).
 
 ```bash
 cd backend && npm test          # unit tests, no infrastructure needed
+cd frontend && npm test         # dashboard: reducer, API client, session, login form
 cd backend && npm run test:e2e  # real app + Postgres + Redis/BullMQ worker + Elasticsearch + Socket.IO (needs the Docker stack; uses a test DB, queue prefix and index)
 ```
 
@@ -203,6 +204,26 @@ npm run db:explain-demo                                        # slow query -> i
 The query optimisation walkthrough (EXPLAIN ANALYZE before/after) is in
 [docs/query-optimization.md](docs/query-optimization.md).
 
+## Dashboard
+
+Open http://localhost:3000 and sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD` from your `.env`.
+
+- **Overview:** total assets, average risk score, current critical findings, % quantum-vulnerable assets (and
+  traffic), a key-algorithm chart and a weak-handshakes-per-hour chart (Elasticsearch), the riskiest assets and
+  certificates expiring soon.
+- **Assets:** search, filter, sort and page through the inventory; admins add assets and start scans (one, or a
+  selection as a batch).
+- **Findings:** filter by severity, category and rule; show only current findings or the full history.
+- **Live scan progress:** a floating panel shows every job's stage and the batch progress bar, pushed over Socket.IO.
+
+Design notes (token storage trade-offs, data flow, charts, CSP): [docs/dashboard.md](docs/dashboard.md).
+
+| Overview | Live scan progress |
+| --- | --- |
+| ![Overview: KPI tiles, key-algorithm and weak-handshake charts](docs/screenshots/overview.jpg) | ![Findings page while a batch scan runs, with retries shown live](docs/screenshots/live-scan.jpg) |
+| **Assets** | **Findings** |
+| ![Assets table sorted by risk](docs/screenshots/assets.jpg) | ![Findings filtered to critical and high](docs/screenshots/findings.jpg) |
+
 ## Security
 
 - **JWT authentication**, secure by default: every route needs a token unless marked `@Public()`.
@@ -283,7 +304,9 @@ All endpoints except login and health need `Authorization: Bearer <token>`. 🔒
 | GET    | `/api/analytics/handshakes/top-weak-rsa-hosts` | Top `limit` (default 10) hosts still using RSA < 2048. |
 | GET    | `/api/analytics/handshakes/quantum-vulnerable` | Percentage of traffic using a quantum-vulnerable key exchange, by group. |
 | GET    | `/api/analytics/handshakes/search` | Log search: `q` (full-text on user agent), `tlsVersion`, `host`, `page`, `pageSize`. |
-| GET    | `/api/findings`     | List findings. Filters: `severity`, `category`, `ruleId` (comma lists), `assetId`, `from`, `to`. Sort: `createdAt`, `severity`. Paginated. |
+| GET    | `/api/dashboard/overview` | Totals, average risk, current findings by severity, % quantum-vulnerable assets, expiring/expired certificates. |
+| GET    | `/api/certificates/expiring` | Certificates in use that expire within `days` (default 30); `includeExpired` (default true); most urgent first. |
+| GET    | `/api/findings`     | List findings. Filters: `severity`, `category`, `ruleId` (comma lists), `assetId`, `from`, `to`, `latestOnly` (current findings only). Sort: `createdAt`, `severity`. Paginated. |
 
 ## Roadmap
 
@@ -294,7 +317,7 @@ All endpoints except login and health need `Authorization: Bearer <token>`. 🔒
 - [x] Step 5 – Elasticsearch log analytics
 - [x] Step 6 – Async pipeline (BullMQ) + real-time (Socket.IO)
 - [x] Step 7 – Security (JWT, roles, validation, rate limiting)
-- [ ] Step 8 – Dashboard
+- [x] Step 8 – Dashboard
 - [ ] Step 9 – Crypto-agility module
 - [ ] Step 10 – Final polish
 

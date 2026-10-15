@@ -8,6 +8,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { AssetsModule } from './assets/assets.module';
 import { AuthModule } from './auth/auth.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { JwtAuthGuard, RolesGuard } from './auth/guards';
 import { AppConfig, loadConfig } from './config/configuration';
 import { buildTypeOrmOptions } from './database/typeorm-options';
@@ -69,6 +70,7 @@ import { UsersModule } from './users/users.module';
     ScanJobsModule,
     UsersModule,
     AuthModule,
+    DashboardModule,
   ],
   // Global guards run in this order for every request:
   // 1. rate limit (before auth, so password guessing is throttled too)
