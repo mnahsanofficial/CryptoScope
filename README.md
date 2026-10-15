@@ -14,7 +14,8 @@ quantum attacks), and shows it all on a dashboard.
 | Frontend       | Next.js 16 (React 19), Tailwind CSS 4      |
 | Database       | PostgreSQL 17                              |
 | Search / logs  | Elasticsearch 8.19 + Kibana                |
-| Queue          | Redis 7 (BullMQ in Step 6)                 |
+| Queue          | BullMQ 5 on Redis 7                        |
+| Real-time      | Socket.IO 4                                |
 | Tests          | Jest                                       |
 
 ## Repository layout
@@ -76,7 +77,7 @@ overrides them with service names (`postgres`, `redis`, `elasticsearch`).
 
 ```bash
 cd backend && npm test          # unit tests, no infrastructure needed
-cd backend && npm run test:e2e  # real app + real Postgres and Elasticsearch (needs the Docker stack; uses a test DB and a temporary index)
+cd backend && npm run test:e2e  # real app + Postgres + Redis/BullMQ worker + Elasticsearch + Socket.IO (needs the Docker stack; uses a test DB, queue prefix and index)
 ```
 
 The scanner tests start real TLS servers on `127.0.0.1` (TLS 1.3, TLS 1.0-only, PQ and non-PQ key exchange),
@@ -193,6 +194,24 @@ npm run db:explain-demo                                        # slow query -> i
 The query optimisation walkthrough (EXPLAIN ANALYZE before/after) is in
 [docs/query-optimization.md](docs/query-optimization.md).
 
+## Async scan pipeline (BullMQ + Socket.IO)
+
+Scans run in the background. `POST /api/assets/:id/scans` (or `POST /api/scan-jobs` for many assets) puts a job
+in a **BullMQ** queue on Redis and returns `202 Accepted` immediately. A worker then:
+
+1. scans the host (temporary network errors are **retried with exponential backoff**);
+2. saves scan + certificate + findings + asset risk in **one Postgres transaction**;
+3. bulk-indexes the findings into **Elasticsearch** (`cryptoscope-findings`);
+4. reports each stage, and progress is pushed live to the browser over **Socket.IO** (namespace `/scans`).
+
+Every step is idempotent, so retries never duplicate data, and duplicate requests for the same asset are deduplicated.
+
+```bash
+cd backend && npm run scans:watch    # print live scan events in the terminal
+```
+
+Design, failure handling and scaling: [docs/async-pipeline.md](docs/async-pipeline.md).
+
 ## TLS handshake analytics (Elasticsearch)
 
 PostgreSQL holds the inventory; Elasticsearch holds the **traffic**: one document per TLS handshake.
@@ -225,7 +244,11 @@ Mapping decisions, query vs filter context and optimisation tips: [docs/elastics
 | GET    | `/api/assets/:id`   | One asset. |
 | PATCH  | `/api/assets/:id`   | Update host, port, label or environment. |
 | DELETE | `/api/assets/:id`   | Delete an asset with its scans and findings. |
-| POST   | `/api/assets/:id/scans` | Scan the asset now and store the scan, certificate and findings. |
+| POST   | `/api/assets/:id/scans` | **Queue** a scan of the asset: `202 { jobId, scanId, created }`. Progress arrives over Socket.IO. |
+| POST   | `/api/scan-jobs`    | Queue scans for many assets: `{ "assetIds": [...] }` (max 1000): `202 { batchId, total, jobs }`. |
+| GET    | `/api/scan-jobs`    | Job counts by state: waiting, active, delayed (waiting to retry), completed, failed. |
+| GET    | `/api/scan-jobs/:jobId` | One job: state, progress, attempts, result or failure reason. |
+| GET    | `/api/scan-jobs/batches/:batchId` | Batch totals: `{ total, completed, failed, percent }`. |
 | GET    | `/api/assets/:id/scans` | Scan history, newest first (paginated). |
 | GET    | `/api/scans/:id`    | One scan with its certificate and findings. |
 | GET    | `/api/analytics/handshakes/key-algorithms` | Handshake count per key algorithm, with key sizes. All analytics endpoints accept `from`, `to` (ISO 8601, default last 7 days). |
@@ -242,7 +265,7 @@ Mapping decisions, query vs filter context and optimisation tips: [docs/elastics
 - [x] Step 3 – Risk scoring engine
 - [x] Step 4 – PostgreSQL data model + query optimization
 - [x] Step 5 – Elasticsearch log analytics
-- [ ] Step 6 – Async pipeline (BullMQ) + real-time (Socket.IO)
+- [x] Step 6 – Async pipeline (BullMQ) + real-time (Socket.IO)
 - [ ] Step 7 – Security (JWT, roles, validation, rate limiting)
 - [ ] Step 8 – Dashboard
 - [ ] Step 9 – Crypto-agility module
