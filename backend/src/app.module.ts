@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AnalyticsModule } from './analytics/analytics.module';
 import { AssetsModule } from './assets/assets.module';
 import { AppConfig, loadConfig } from './config/configuration';
 import { buildTypeOrmOptions } from './database/typeorm-options';
@@ -36,6 +37,7 @@ import { ScansModule } from './scans/scans.module';
     AssetsModule,
     ScansModule,
     FindingsModule,
+    AnalyticsModule,
   ],
 })
 export class AppModule {}
