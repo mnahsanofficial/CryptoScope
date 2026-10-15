@@ -6,6 +6,7 @@ import { createLimiter } from './concurrency';
 import { ScanError, toScanError } from './scan-error';
 import { formatTarget, parseTarget } from './scan-target';
 import { KeyExchangeInfo, ScanOutcome, ScanTarget, TlsScanResult } from './scanner.types';
+import { Resolver, TargetPolicy } from './target-policy';
 
 export interface ScannerOptions {
   /** Max time for DNS + TCP connect + TLS handshake, per connection. */
@@ -14,6 +15,10 @@ export interface ScannerOptions {
   concurrency: number;
   /** Run a second handshake to test for hybrid post-quantum key exchange. */
   probePostQuantum: boolean;
+  /** Allow private/loopback/reserved addresses. Off in production (SSRF protection). */
+  allowPrivateTargets: boolean;
+  /** For tests: replace DNS resolution. */
+  resolver?: Resolver;
 }
 
 export const SCANNER_OPTIONS = Symbol('SCANNER_OPTIONS');
@@ -46,8 +51,11 @@ interface HandshakeSnapshot {
 @Injectable()
 export class TlsScannerService {
   private readonly logger = new Logger(TlsScannerService.name);
+  private readonly policy: TargetPolicy;
 
-  constructor(@Inject(SCANNER_OPTIONS) private readonly options: ScannerOptions) {}
+  constructor(@Inject(SCANNER_OPTIONS) private readonly options: ScannerOptions) {
+    this.policy = new TargetPolicy(options.allowPrivateTargets, options.resolver);
+  }
 
   /**
    * Scans many targets in parallel (bounded by `concurrency`).
@@ -80,12 +88,14 @@ export class TlsScannerService {
   /** Scans one target. Throws ScanError on failure. */
   async scan(target: ScanTarget): Promise<TlsScanResult> {
     const started = Date.now();
-    const handshake = await this.handshake(target, PERMISSIVE_CLIENT_OPTIONS, snapshot);
+    // Resolve + SSRF check once, then connect to that exact IP for every handshake.
+    const address = await this.policy.resolveAllowedAddress(target.host);
+    const handshake = await this.handshake(target, address, PERMISSIVE_CLIENT_OPTIONS, snapshot);
 
     // Hybrid PQ key exchange only exists in TLS 1.3.
     const postQuantumKeyExchange =
       this.options.probePostQuantum && handshake.protocol === 'TLSv1.3'
-        ? await this.supportsHybridPqKeyExchange(target)
+        ? await this.supportsHybridPqKeyExchange(target, address)
         : null;
 
     return {
@@ -111,10 +121,11 @@ export class TlsScannerService {
    * Offers ONLY the hybrid group. If the handshake succeeds, the server supports it.
    * Returns null when we can't tell (timeout, or the local OpenSSL doesn't know the group).
    */
-  private async supportsHybridPqKeyExchange(target: ScanTarget): Promise<boolean | null> {
+  private async supportsHybridPqKeyExchange(target: ScanTarget, address: string): Promise<boolean | null> {
     try {
       await this.handshake(
         target,
+        address,
         { ...PERMISSIVE_CLIENT_OPTIONS, minVersion: 'TLSv1.3', ecdhCurve: HYBRID_PQ_GROUP },
         () => true,
       );
@@ -133,13 +144,14 @@ export class TlsScannerService {
    */
   private handshake<T>(
     target: ScanTarget,
+    address: string,
     options: tls.ConnectionOptions,
     onSecure: (socket: tls.TLSSocket) => T,
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const socket = tls.connect({
         ...options,
-        host: target.host,
+        host: address, // the IP we checked, never the name again (prevents DNS rebinding)
         port: target.port,
         // SNI tells the server which certificate to send. It must be a hostname, never an IP.
         servername: isIP(target.host) ? undefined : target.host,

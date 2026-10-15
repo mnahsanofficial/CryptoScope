@@ -63,7 +63,8 @@ function expectFailure(outcome: ScanOutcome) {
 }
 
 describe('TlsScannerService', () => {
-  const options: ScannerOptions = { timeoutMs: 1_000, concurrency: 5, probePostQuantum: true };
+  // The test servers listen on 127.0.0.1, so private targets must be allowed here (see the SSRF tests below).
+  const options: ScannerOptions = { timeoutMs: 1_000, concurrency: 5, probePostQuantum: true, allowPrivateTargets: true };
   let scanner: TlsScannerService;
 
   beforeAll(() => Logger.overrideLogger(false)); // failures below are expected; keep test output clean

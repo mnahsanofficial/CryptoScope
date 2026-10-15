@@ -14,8 +14,8 @@ import { SCANNER_OPTIONS, ScannerOptions, TlsScannerService } from './tls-scanne
       provide: SCANNER_OPTIONS,
       inject: [ConfigService],
       useFactory: (config: ConfigService): ScannerOptions => {
-        const { timeoutMs, concurrency } = config.getOrThrow<AppConfig['scanner']>('scanner');
-        return { timeoutMs, concurrency, probePostQuantum: true };
+        const { timeoutMs, concurrency, allowPrivateTargets } = config.getOrThrow<AppConfig['scanner']>('scanner');
+        return { timeoutMs, concurrency, probePostQuantum: true, allowPrivateTargets };
       },
     },
   ],
