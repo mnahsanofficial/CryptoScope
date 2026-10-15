@@ -5,6 +5,7 @@ import { AppConfig, loadConfig } from './config/configuration';
 import { ElasticsearchModule } from './infra/elasticsearch.module';
 import { RedisModule } from './infra/redis.module';
 import { HealthModule } from './health/health.module';
+import { RiskModule } from './risk/risk.module';
 import { ScannerModule } from './scanner/scanner.module';
 
 @Module({
@@ -36,6 +37,7 @@ import { ScannerModule } from './scanner/scanner.module';
     ElasticsearchModule,
     HealthModule,
     ScannerModule,
+    RiskModule,
   ],
 })
 export class AppModule {}
