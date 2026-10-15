@@ -36,7 +36,16 @@ Requirements: Docker Desktop or Rancher Desktop with **at least 4 GB of memory**
 
 ```bash
 cp .env.example .env
+# then edit .env: set JWT_SECRET (openssl rand -base64 48), POSTGRES_PASSWORD and ADMIN_PASSWORD (12+ chars)
 docker compose up --build
+```
+
+Log in to get a token (the first admin is created from `ADMIN_EMAIL` / `ADMIN_PASSWORD`):
+
+```bash
+curl -s -X POST localhost:3001/api/auth/login -H 'content-type: application/json' \
+  -d '{"email":"admin@cryptoscope.local","password":"<your ADMIN_PASSWORD>"}'
+# then: curl -H "Authorization: Bearer <accessToken>" localhost:3001/api/assets
 ```
 
 First start takes a few minutes (image downloads, Elasticsearch boot). Then:
@@ -194,6 +203,18 @@ npm run db:explain-demo                                        # slow query -> i
 The query optimisation walkthrough (EXPLAIN ANALYZE before/after) is in
 [docs/query-optimization.md](docs/query-optimization.md).
 
+## Security
+
+- **JWT authentication**, secure by default: every route needs a token unless marked `@Public()`.
+- **Roles:** `admin` scans and manages assets and users; `viewer` can only read. An e2e test audits every route.
+- **Passwords** hashed with scrypt (memory-hard, OWASP parameters, re-hashed when parameters are raised).
+- **Rate limiting** in Redis: 100 requests/min per IP, 5 login attempts/min.
+- **helmet** security headers, strict CORS, 100 kB body limit, validated DTOs that reject unknown fields.
+- **SSRF protection:** the scanner refuses private, loopback and cloud-metadata addresses and pins the resolved IP (no DNS rebinding).
+- **No secrets in code:** everything comes from `.env`; the app refuses to start without a strong `JWT_SECRET`.
+
+Details, design choices and the "not production-ready yet" list: [docs/security.md](docs/security.md).
+
 ## Async scan pipeline (BullMQ + Socket.IO)
 
 Scans run in the background. `POST /api/assets/:id/scans` (or `POST /api/scan-jobs` for many assets) puts a job
@@ -207,7 +228,7 @@ in a **BullMQ** queue on Redis and returns `202 Accepted` immediately. A worker 
 Every step is idempotent, so retries never duplicate data, and duplicate requests for the same asset are deduplicated.
 
 ```bash
-cd backend && npm run scans:watch    # print live scan events in the terminal
+cd backend && CRYPTOSCOPE_TOKEN=<accessToken> npm run scans:watch    # print live scan events
 ```
 
 Design, failure handling and scaling: [docs/async-pipeline.md](docs/async-pipeline.md).
@@ -232,20 +253,26 @@ Mapping decisions, query vs filter context and optimisation tips: [docs/elastics
 
 ## API
 
+All endpoints except login and health need `Authorization: Bearer <token>`. 🔒 = admin only.
+
 | Method | Path                | Description                                                      |
 | ------ | ------------------- | ---------------------------------------------------------------- |
+| POST   | `/api/auth/login`   | `{ email, password }` → `{ accessToken, tokenType, user }`. Public, max 5 attempts/min. |
+| GET    | `/api/auth/me`      | The current user. |
+| POST   | `/api/users`        | 🔒 Create a user: `{ email, password (12+ chars), role: "admin" \| "viewer" }`. |
+| GET    | `/api/users`        | 🔒 List users. |
 | GET    | `/api/health`       | Liveness: the process is up. Used by Docker's healthcheck.       |
 | GET    | `/api/health/ready` | Readiness: Postgres, Redis and Elasticsearch reachable (or 503). |
 | GET    | `/api/scanner/seed-targets` | The demo target list.                                    |
-| POST   | `/api/scanner/scan` | Scan up to 50 targets: `{ "targets": ["github.com", "host:8443"] }`. Each result includes its risk assessment. |
+| POST   | `/api/scanner/scan` | 🔒 Scan up to 50 targets: `{ "targets": ["github.com", "host:8443"] }`. Each result includes its risk assessment. |
 | GET    | `/api/risk/rules`   | All risk rules with severity, category and rationale, plus the score weights. |
-| POST   | `/api/assets`       | Create an asset: `{ "host": "github.com", "port": 443, "label": "...", "environment": "production" }` |
+| POST   | `/api/assets`       | 🔒 Create an asset: `{ "host": "github.com", "port": 443, "label": "...", "environment": "production" }` |
 | GET    | `/api/assets`       | List assets. Filters: `search`, `riskLevel` (comma list), `environment`. Sort: `riskScore`, `host`, `lastScannedAt`, `createdAt`. Paging: `page`, `pageSize` (max 100), `order`. |
 | GET    | `/api/assets/:id`   | One asset. |
-| PATCH  | `/api/assets/:id`   | Update host, port, label or environment. |
-| DELETE | `/api/assets/:id`   | Delete an asset with its scans and findings. |
-| POST   | `/api/assets/:id/scans` | **Queue** a scan of the asset: `202 { jobId, scanId, created }`. Progress arrives over Socket.IO. |
-| POST   | `/api/scan-jobs`    | Queue scans for many assets: `{ "assetIds": [...] }` (max 1000): `202 { batchId, total, jobs }`. |
+| PATCH  | `/api/assets/:id`   | 🔒 Update host, port, label or environment. |
+| DELETE | `/api/assets/:id`   | 🔒 Delete an asset with its scans and findings. |
+| POST   | `/api/assets/:id/scans` | 🔒 **Queue** a scan of the asset: `202 { jobId, scanId, created }`. Progress arrives over Socket.IO. |
+| POST   | `/api/scan-jobs`    | 🔒 Queue scans for many assets: `{ "assetIds": [...] }` (max 1000): `202 { batchId, total, jobs }`. |
 | GET    | `/api/scan-jobs`    | Job counts by state: waiting, active, delayed (waiting to retry), completed, failed. |
 | GET    | `/api/scan-jobs/:jobId` | One job: state, progress, attempts, result or failure reason. |
 | GET    | `/api/scan-jobs/batches/:batchId` | Batch totals: `{ total, completed, failed, percent }`. |
@@ -266,7 +293,7 @@ Mapping decisions, query vs filter context and optimisation tips: [docs/elastics
 - [x] Step 4 – PostgreSQL data model + query optimization
 - [x] Step 5 – Elasticsearch log analytics
 - [x] Step 6 – Async pipeline (BullMQ) + real-time (Socket.IO)
-- [ ] Step 7 – Security (JWT, roles, validation, rate limiting)
+- [x] Step 7 – Security (JWT, roles, validation, rate limiting)
 - [ ] Step 8 – Dashboard
 - [ ] Step 9 – Crypto-agility module
 - [ ] Step 10 – Final polish
