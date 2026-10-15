@@ -1,6 +1,6 @@
 import { TlsScanResult } from '../scanner/scanner.types';
 import { RiskRule, RULES } from './rules';
-import { Finding, RiskAssessment, RiskLevel, RuleMetadata, Severity } from './risk.types';
+import { Finding, RiskAssessment, RiskLevel, RuleMetadata, Severity, SEVERITIES } from './risk.types';
 
 /**
  * Points each finding adds to the score. The score is the sum, capped at 100.
@@ -13,7 +13,7 @@ export const SEVERITY_WEIGHTS: Record<Severity, number> = {
   low: 3,
 };
 
-const SEVERITY_ORDER: Severity[] = ['critical', 'high', 'medium', 'low'];
+const SEVERITY_ORDER: readonly Severity[] = SEVERITIES;
 
 /**
  * Turns a scan result into a risk assessment by running every rule.

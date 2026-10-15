@@ -1,9 +1,14 @@
-export type Severity = 'critical' | 'high' | 'medium' | 'low';
+// `as const` arrays give us both runtime values (for DB enums and validation) and TypeScript types.
+// Order matters: worst first. Postgres sorts enum values in declaration order.
+export const SEVERITIES = ['critical', 'high', 'medium', 'low'] as const;
+export type Severity = (typeof SEVERITIES)[number];
 
 /** The overall level of an asset is its worst finding, or 'none' if it has no findings. */
-export type RiskLevel = Severity | 'none';
+export const RISK_LEVELS = [...SEVERITIES, 'none'] as const;
+export type RiskLevel = (typeof RISK_LEVELS)[number];
 
-export type FindingCategory = 'certificate' | 'protocol' | 'quantum';
+export const FINDING_CATEGORIES = ['certificate', 'protocol', 'quantum'] as const;
+export type FindingCategory = (typeof FINDING_CATEGORIES)[number];
 
 export type RuleId =
   | 'CERT_EXPIRED'
