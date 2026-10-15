@@ -47,7 +47,7 @@ First start takes a few minutes (image downloads, Elasticsearch boot). Then:
 | API readiness    | http://localhost:3001/api/health/ready |
 | Elasticsearch    | http://localhost:9200                  |
 | Kibana           | http://localhost:5601                  |
-| PostgreSQL       | `localhost:5433` (user/db from `.env`) |
+| PostgreSQL       | `localhost:5434` (user/db from `.env`) |
 | Redis            | `localhost:6379`                       |
 
 Check everything at once:
@@ -75,7 +75,8 @@ overrides them with service names (`postgres`, `redis`, `elasticsearch`).
 ## Tests
 
 ```bash
-cd backend && npm test
+cd backend && npm test          # unit tests, no infrastructure needed
+cd backend && npm run test:e2e  # real app + real Postgres (needs the Docker stack; uses a separate cryptoscope_test DB)
 ```
 
 The scanner tests start real TLS servers on `127.0.0.1` (TLS 1.3, TLS 1.0-only, PQ and non-PQ key exchange),
@@ -124,6 +125,74 @@ Each rule is a pure function that returns a finding (with evidence and a recomme
 **Level** = the worst finding's severity, so a single critical issue is never hidden by a low score.
 Only a fully post-quantum server (ML-DSA certificate + hybrid ML-KEM key exchange, TLS 1.3) scores 0.
 
+## Data model (PostgreSQL)
+
+```mermaid
+erDiagram
+    assets ||--o{ scans : "has history of"
+    certificates ||--o{ scans : "seen in"
+    scans ||--o{ findings : produces
+    assets ||--o{ findings : "denormalised link"
+
+    assets {
+        uuid id PK
+        varchar host "unique with port"
+        int port
+        asset_environment environment
+        smallint latest_risk_score "copy of latest scan"
+        risk_level latest_risk_level
+        timestamptz last_scanned_at
+    }
+    scans {
+        uuid id PK
+        uuid asset_id FK "ON DELETE CASCADE"
+        uuid certificate_id FK "ON DELETE SET NULL"
+        scan_status status
+        timestamptz scanned_at
+        varchar protocol
+        boolean post_quantum_key_exchange
+        varchar error_code
+        smallint risk_score
+    }
+    certificates {
+        uuid id PK
+        varchar fingerprint_sha256 "unique"
+        timestamptz valid_to
+        varchar key_algorithm
+        int key_size
+        varchar signature_algorithm
+        boolean self_signed
+    }
+    findings {
+        uuid id PK
+        uuid scan_id FK
+        uuid asset_id FK
+        varchar rule_id
+        finding_severity severity
+        finding_category category
+        jsonb evidence
+        timestamptz created_at
+    }
+```
+
+- **Certificates are stored once per fingerprint** and shared by scans (an `INSERT ... ON CONFLICT` upsert).
+- **Every scan is kept**, including failed ones, so we have history. `assets.latest_risk_*` is a denormalised
+  copy of the newest successful scan, so listing assets by risk needs no join.
+- **Schema changes are migrations** in `backend/src/database/migrations` (`synchronize` is off). They run
+  automatically when the backend starts.
+
+```bash
+cd backend
+npm run migration:show                                         # what's applied
+npm run migration:generate -- src/database/migrations/AddX     # diff entities -> new migration
+npm run migration:revert                                       # undo the last one
+npm run seed                                                   # 20k assets, 100k scans, ~200k findings (~20 s)
+npm run db:explain-demo                                        # slow query -> index -> 214x faster
+```
+
+The query optimisation walkthrough (EXPLAIN ANALYZE before/after) is in
+[docs/query-optimization.md](docs/query-optimization.md).
+
 ## API
 
 | Method | Path                | Description                                                      |
@@ -133,17 +202,26 @@ Only a fully post-quantum server (ML-DSA certificate + hybrid ML-KEM key exchang
 | GET    | `/api/scanner/seed-targets` | The demo target list.                                    |
 | POST   | `/api/scanner/scan` | Scan up to 50 targets: `{ "targets": ["github.com", "host:8443"] }`. Each result includes its risk assessment. |
 | GET    | `/api/risk/rules`   | All risk rules with severity, category and rationale, plus the score weights. |
+| POST   | `/api/assets`       | Create an asset: `{ "host": "github.com", "port": 443, "label": "...", "environment": "production" }` |
+| GET    | `/api/assets`       | List assets. Filters: `search`, `riskLevel` (comma list), `environment`. Sort: `riskScore`, `host`, `lastScannedAt`, `createdAt`. Paging: `page`, `pageSize` (max 100), `order`. |
+| GET    | `/api/assets/:id`   | One asset. |
+| PATCH  | `/api/assets/:id`   | Update host, port, label or environment. |
+| DELETE | `/api/assets/:id`   | Delete an asset with its scans and findings. |
+| POST   | `/api/assets/:id/scans` | Scan the asset now and store the scan, certificate and findings. |
+| GET    | `/api/assets/:id/scans` | Scan history, newest first (paginated). |
+| GET    | `/api/scans/:id`    | One scan with its certificate and findings. |
+| GET    | `/api/findings`     | List findings. Filters: `severity`, `category`, `ruleId` (comma lists), `assetId`, `from`, `to`. Sort: `createdAt`, `severity`. Paginated. |
 
 ## Roadmap
 
 - [x] Step 1 – Project setup, docker-compose, health checks
 - [x] Step 2 – TLS scanner service
 - [x] Step 3 – Risk scoring engine
-- [ ] Step 4 – PostgreSQL data model + query optimization
+- [x] Step 4 – PostgreSQL data model + query optimization
 - [ ] Step 5 – Elasticsearch log analytics
 - [ ] Step 6 – Async pipeline (BullMQ) + real-time (Socket.IO)
 - [ ] Step 7 – Security (JWT, roles, validation, rate limiting)
 - [ ] Step 8 – Dashboard
 - [ ] Step 9 – Crypto-agility module
 - [ ] Step 10 – Final polish
-# CryptoScope
+

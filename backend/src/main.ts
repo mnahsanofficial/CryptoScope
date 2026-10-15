@@ -1,20 +1,14 @@
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { configureApp } from './app.setup';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
-  const config = app.get(ConfigService);
+  configureApp(app);
 
-  app.setGlobalPrefix('api');
-  // Validate every request body against its DTO; reject unknown fields instead of silently passing them on.
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
-  app.enableCors({ origin: config.getOrThrow<string>('frontendUrl') });
-  // Lets modules close DB/Redis/ES connections cleanly on SIGTERM (e.g. `docker compose down`).
-  app.enableShutdownHooks();
-
-  const port = config.getOrThrow<number>('port');
+  const port = app.get(ConfigService).getOrThrow<number>('port');
   await app.listen(port, '0.0.0.0');
   Logger.log(`CryptoScope API listening on http://localhost:${port}/api`, 'Bootstrap');
 }

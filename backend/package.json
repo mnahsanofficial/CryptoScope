@@ -13,7 +13,15 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
-    "scan": "ts-node --transpile-only src/cli/scan.ts"
+    "scan": "ts-node --transpile-only src/cli/scan.ts",
+    "typeorm": "typeorm-ts-node-commonjs -d src/database/data-source.ts",
+    "migration:generate": "npm run typeorm -- migration:generate",
+    "migration:run": "npm run typeorm -- migration:run",
+    "migration:revert": "npm run typeorm -- migration:revert",
+    "migration:show": "npm run typeorm -- migration:show",
+    "seed": "ts-node --transpile-only src/database/seed/seed.ts",
+    "db:explain-demo": "ts-node --transpile-only src/database/perf/explain-demo.ts",
+    "test:e2e": "jest --config ./test/jest-e2e.json --runInBand"
   },
   "jest": {
     "moduleFileExtensions": [
@@ -32,17 +40,22 @@
       "!**/*.module.ts"
     ],
     "coverageDirectory": "../coverage",
-    "testEnvironment": "node"
+    "testEnvironment": "node",
+    "setupFiles": [
+      "reflect-metadata"
+    ]
   },
   "dependencies": {
     "@elastic/elasticsearch": "^8.19.2",
     "@nestjs/common": "^11.2.7",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.2.7",
+    "@nestjs/mapped-types": "^2.1.1",
     "@nestjs/platform-express": "^11.2.7",
     "@nestjs/typeorm": "^11.0.3",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "dotenv": "^17.4.2",
     "ioredis": "^5.11.1",
     "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",
@@ -56,6 +69,7 @@
     "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
     "@types/supertest": "^7.2.1",
     "jest": "^30.5.2",
     "source-map-support": "^0.5.21",
