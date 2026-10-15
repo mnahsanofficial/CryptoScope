@@ -15,6 +15,10 @@ export interface AppConfig {
   elasticsearch: {
     node: string;
   };
+  scanner: {
+    timeoutMs: number;
+    concurrency: number;
+  };
 }
 
 function required(env: NodeJS.ProcessEnv, key: string): string {
@@ -31,6 +35,14 @@ function toPort(value: string, key: string): number {
     throw new Error(`Environment variable ${key} must be a valid port, got "${value}"`);
   }
   return port;
+}
+
+function toPositiveInt(value: string, key: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`Environment variable ${key} must be a positive integer, got "${value}"`);
+  }
+  return n;
 }
 
 /**
@@ -55,6 +67,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     elasticsearch: {
       node: required(env, 'ELASTICSEARCH_NODE'),
+    },
+    scanner: {
+      timeoutMs: toPositiveInt(env.SCAN_TIMEOUT_MS ?? '5000', 'SCAN_TIMEOUT_MS'),
+      concurrency: toPositiveInt(env.SCAN_CONCURRENCY ?? '10', 'SCAN_CONCURRENCY'),
     },
   };
 }

@@ -5,6 +5,7 @@ import { AppConfig, loadConfig } from './config/configuration';
 import { ElasticsearchModule } from './infra/elasticsearch.module';
 import { RedisModule } from './infra/redis.module';
 import { HealthModule } from './health/health.module';
+import { ScannerModule } from './scanner/scanner.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { HealthModule } from './health/health.module';
     RedisModule,
     ElasticsearchModule,
     HealthModule,
+    ScannerModule,
   ],
 })
 export class AppModule {}

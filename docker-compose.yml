@@ -85,6 +85,8 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       ELASTICSEARCH_NODE: http://elasticsearch:9200
+      SCAN_TIMEOUT_MS: ${SCAN_TIMEOUT_MS:-5000}
+      SCAN_CONCURRENCY: ${SCAN_CONCURRENCY:-10}
     ports:
       - "${BACKEND_PORT:-3001}:${BACKEND_PORT:-3001}"
     depends_on:

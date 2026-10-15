@@ -78,17 +78,44 @@ overrides them with service names (`postgres`, `redis`, `elasticsearch`).
 cd backend && npm test
 ```
 
+The scanner tests start real TLS servers on `127.0.0.1` (TLS 1.3, TLS 1.0-only, PQ and non-PQ key exchange),
+so they cover the real handshake code without needing internet access.
+
+## TLS scanner
+
+Connects to each target, completes a TLS handshake and records:
+
+- protocol version, cipher suite and key exchange group
+- whether the server supports **hybrid post-quantum key exchange** (`X25519MLKEM768`)
+- certificate subject, issuer, SANs, validity dates, fingerprint
+- public key algorithm and size (RSA, EC, Ed25519, ML-DSA) and signature algorithm
+- trust result (`CERT_HAS_EXPIRED`, `DEPTH_ZERO_SELF_SIGNED_CERT`, ...) without refusing to connect
+
+Targets are scanned in parallel with a concurrency limit and a per-connection timeout
+(`SCAN_CONCURRENCY`, `SCAN_TIMEOUT_MS`). One failing host never affects the others.
+
+From the command line (no server needed):
+
+```bash
+cd backend
+npm run scan                               # scan the seed targets
+npm run scan -- github.com example.com:8443
+npm run scan -- --json google.com          # full JSON output
+```
+
 ## API
 
 | Method | Path                | Description                                                      |
 | ------ | ------------------- | ---------------------------------------------------------------- |
 | GET    | `/api/health`       | Liveness: the process is up. Used by Docker's healthcheck.       |
 | GET    | `/api/health/ready` | Readiness: Postgres, Redis and Elasticsearch reachable (or 503). |
+| GET    | `/api/scanner/seed-targets` | The demo target list.                                    |
+| POST   | `/api/scanner/scan` | Scan up to 50 targets: `{ "targets": ["github.com", "host:8443"] }`. |
 
 ## Roadmap
 
 - [x] Step 1 – Project setup, docker-compose, health checks
-- [ ] Step 2 – TLS scanner service
+- [x] Step 2 – TLS scanner service
 - [ ] Step 3 – Risk scoring engine
 - [ ] Step 4 – PostgreSQL data model + query optimization
 - [ ] Step 5 – Elasticsearch log analytics
