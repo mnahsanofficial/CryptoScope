@@ -1,222 +1,230 @@
 # CryptoScope
 
-A mini **cryptographic inventory and risk assessment** platform. It scans TLS endpoints, records which
-algorithms, key sizes and protocol versions are in use, scores the risk (including exposure to future
-quantum attacks), and shows it all on a dashboard.
+[![CI](https://github.com/mnahsanofficial/CryptoScope/actions/workflows/ci.yml/badge.svg)](https://github.com/mnahsanofficial/CryptoScope/actions/workflows/ci.yml)
 
-> Work in progress — built step by step. See [Roadmap](#roadmap).
+**A cryptographic inventory and quantum-risk dashboard.** CryptoScope scans TLS endpoints, records every algorithm,
+key, certificate and protocol it finds, scores the risk (including exposure to future quantum computers), analyses
+TLS traffic at scale, and shows it all live on a dashboard. A crypto-agility module demonstrates how to move from
+RSA/ECDSA to the post-quantum **ML-DSA** signature standard by changing configuration, not code.
 
-## Tech stack
+Built as a portfolio project, in the spirit of crypto-inventory tools such as ISARA Advance, with NestJS, Next.js,
+PostgreSQL, Elasticsearch, BullMQ and Socket.IO.
 
-| Layer          | Technology                                 |
-| -------------- | ------------------------------------------ |
-| Backend API    | NestJS 11 (TypeScript), TypeORM, Node.js 24 in Docker (for ML-DSA) |
-| Frontend       | Next.js 16 (React 19), Tailwind CSS 4      |
-| Database       | PostgreSQL 17                              |
-| Search / logs  | Elasticsearch 8.19 + Kibana                |
-| Queue          | BullMQ 5 on Redis 7                        |
-| Real-time      | Socket.IO 4                                |
-| Tests          | Jest                                       |
+![CryptoScope overview: KPI tiles, key-algorithm and weak-handshake charts](docs/screenshots/overview.jpg)
 
-## Repository layout
+## What it does
 
+| | |
+| --- | --- |
+| **Discover** | A TLS scanner reads the protocol, cipher, key exchange, certificate key and signature algorithm of any host, and detects **hybrid post-quantum key exchange** (`X25519MLKEM768`). |
+| **Assess** | A rules engine turns each scan into findings (expired certs, weak RSA, SHA-1, TLS 1.0, quantum-vulnerable keys, no PQ key exchange) and a 0–100 risk score. |
+| **Inventory** | PostgreSQL keeps assets, the full scan history, deduplicated certificates and findings: 350k+ rows of seed data, with indexed queries. |
+| **Analyse traffic** | Elasticsearch aggregates 500k TLS handshake logs: key algorithms, weak handshakes per hour, hosts with RSA < 2048, % quantum-vulnerable traffic. |
+| **Scale** | Scans run as BullMQ jobs with retries and backoff; progress streams to the browser over Socket.IO. |
+| **Protect** | JWT auth with admin/viewer roles, scrypt passwords, rate limiting, security headers, SSRF protection. |
+| **Migrate** | A crypto-agility module signs with RSA, ECDSA, **ML-DSA-65** or a **hybrid ECDSA + ML-DSA**, selected by config. |
+
+## How this relates to quantum-safe security
+
+**The threat.** A large enough quantum computer running **Shor's algorithm** breaks RSA and elliptic-curve
+cryptography, the basis of almost every TLS certificate, code signature and key exchange today. Two consequences:
+
+- **Harvest now, decrypt later:** traffic recorded *today* with classical key exchange (ECDH, RSA) can be decrypted
+  once such a computer exists. Long-lived secrets are already at risk.
+- **Forgery later:** RSA/ECDSA signatures (certificates, firmware, documents) become forgeable, so trust has to move
+  to new algorithms before that happens.
+
+**The response.** NIST standardised post-quantum algorithms in 2024: **ML-KEM** (FIPS 203) for key exchange and
+**ML-DSA** (FIPS 204) for signatures, and plans to deprecate RSA/ECC around 2030 and disallow them by 2035
+(NIST IR 8547). Migrating a large organisation takes years, and it starts with knowing where the vulnerable
+cryptography is.
+
+**How CryptoScope maps to that migration:**
+
+| Migration step | What CryptoScope does | Where |
+| --- | --- | --- |
+| **1. Discover**: find all cryptography in use | Scans endpoints and parses certificates, including ML-DSA certificates Node can't parse itself (a small DER reader) | [scanner](backend/src/scanner), [Step 2](https://github.com/mnahsanofficial/CryptoScope/pull/1) |
+| **2. Assess**: which assets are quantum-vulnerable? | `QUANTUM_VULNERABLE_KEY` for every RSA/ECC key; `NO_PQ_KEY_EXCHANGE` when hybrid ML-KEM isn't negotiated | [risk rules](backend/src/risk/rules.ts) |
+| **3. Measure exposure**: how much traffic is at risk? | % of TLS handshakes using classical key exchange (85% in the sample data) | [analytics](backend/src/analytics), [docs](docs/elasticsearch.md) |
+| **4. Prioritise** | Risk score and level per asset; current findings; expiring certificates (renewal = migration opportunity) | [dashboard](docs/dashboard.md) |
+| **5. Become crypto-agile** | Algorithms behind one interface, chosen by config; signatures name their algorithm so old and new coexist | [crypto-agility](docs/crypto-agility.md) |
+| **6. Migrate safely** | ML-DSA-65 signing for real (Node.js 24), and **hybrid** ECDSA + ML-DSA that stays secure if either algorithm holds | [Step 9](https://github.com/mnahsanofficial/CryptoScope/pull/8) |
+
+What the real-world scans show: google.com and cloudflare.com already negotiate hybrid **X25519MLKEM768** key
+exchange, github.com doesn't, and every certificate scanned still uses a quantum-vulnerable RSA or ECDSA key. That
+is today's typical picture: key exchange is migrating first (harvest-now-decrypt-later), and signatures are next.
+And the cost is real: an ML-DSA-65 signature is **3,309 bytes vs 71 for ECDSA**, which matters for certificate
+chains, TLS handshakes and constrained devices.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    user([Browser]) -->|HTTPS + JWT| fe[Next.js dashboard<br/>:3000]
+    user -->|REST + JWT| api
+    user <-->|Socket.IO /scans| api
+
+    subgraph backend [NestJS backend :3001]
+        api[REST API<br/>auth · assets · findings<br/>analytics · crypto]
+        worker[BullMQ worker<br/>scan → save → index]
+        listener[Queue-events listener]
+        scanner[TLS scanner<br/>+ SSRF policy]
+        risk[Risk engine]
+        crypto[Crypto providers<br/>RSA · ECDSA · ML-DSA · hybrid]
+        api --> crypto
+        worker --> scanner --> risk
+    end
+
+    api -->|enqueue| redis[(Redis<br/>BullMQ · rate limits)]
+    redis -->|jobs| worker
+    worker -->|progress| redis
+    redis -->|events| listener --> api
+    scanner -->|TLS handshake| internet((TLS endpoints))
+    api --> pg[(PostgreSQL<br/>inventory)]
+    worker -->|1 transaction| pg
+    worker -->|bulk index| es[(Elasticsearch<br/>findings · handshake logs)]
+    api -->|aggregations| es
+    kibana[Kibana :5601] --> es
 ```
-CryptoScope/
-├── backend/            NestJS API (port 3001, prefix /api)
-├── frontend/           Next.js dashboard (port 3000)
-├── scripts/            helper scripts (smoke tests, seeders, log generators)
-├── docker-compose.yml  the whole stack
-└── .env.example        configuration template
-```
 
-## Quick start (everything in Docker)
+| Path | What happens |
+| --- | --- |
+| **Start a scan** | `POST /api/scan-jobs` → job in Redis → `202 Accepted` → the worker scans, applies the risk rules, saves in one Postgres transaction, indexes findings into Elasticsearch. Retries use exponential backoff, and every step is idempotent. |
+| **Live progress** | worker → `job.updateProgress()` → Redis stream → each API process → Socket.IO → browser. Workers can run in separate containers. |
+| **Dashboard data** | Inventory from PostgreSQL (each asset's latest scan); traffic analytics from Elasticsearch aggregations. |
 
-Requirements: Docker Desktop or Rancher Desktop with **at least 4 GB of memory** for the VM
-(Elasticsearch + Kibana are the heavy ones).
+More detail: [async pipeline](docs/async-pipeline.md) · [data model](#data-model) · [security](docs/security.md).
+
+## Quick start
+
+Requirements: **Docker** (Docker Desktop or Rancher Desktop) with at least **4 GB of memory** for its VM.
+Node.js 22+ is only needed for the seed scripts and local development.
 
 ```bash
+git clone https://github.com/mnahsanofficial/CryptoScope.git && cd CryptoScope
 cp .env.example .env
-# then edit .env: set JWT_SECRET (openssl rand -base64 48), POSTGRES_PASSWORD and ADMIN_PASSWORD (12+ chars)
-docker compose up --build
 ```
 
-Log in to get a token (the first admin is created from `ADMIN_EMAIL` / `ADMIN_PASSWORD`):
+Edit `.env` and set the three secrets (the app refuses to start without them):
 
 ```bash
-curl -s -X POST localhost:3001/api/auth/login -H 'content-type: application/json' \
-  -d '{"email":"admin@cryptoscope.local","password":"<your ADMIN_PASSWORD>"}'
-# then: curl -H "Authorization: Bearer <accessToken>" localhost:3001/api/assets
+JWT_SECRET=          # openssl rand -base64 48
+POSTGRES_PASSWORD=   # anything, local only
+ADMIN_PASSWORD=      # 12+ characters; the first admin is ADMIN_EMAIL / ADMIN_PASSWORD
 ```
 
-First start takes a few minutes (image downloads, Elasticsearch boot). Then:
-
-| Service          | URL                                    |
-| ---------------- | -------------------------------------- |
-| Dashboard        | http://localhost:3000                  |
-| API liveness     | http://localhost:3001/api/health       |
-| API readiness    | http://localhost:3001/api/health/ready |
-| Elasticsearch    | http://localhost:9200                  |
-| Kibana           | http://localhost:5601                  |
-| PostgreSQL       | `localhost:5434` (user/db from `.env`) |
-| Redis            | `localhost:6379`                       |
-
-Check everything at once:
+Start everything with one command (the first run downloads images and takes a few minutes):
 
 ```bash
-./scripts/check-health.sh
+docker compose up -d --build --wait
 ```
 
-Stop with `docker compose down` (add `-v` to also delete the data volumes).
+Optional: fill it with realistic data (the dashboard is more interesting with it):
 
-## Local development (hot reload)
+```bash
+cd backend && npm ci
+npm run seed            # 20,000 assets, 100,000 scans, ~200,000 findings (~20 s)
+npm run logs:generate   # 500,000 TLS handshake logs into Elasticsearch (~5 s)
+```
 
-Run only the infrastructure in Docker, and the apps on your machine:
+| Service | URL |
+| --- | --- |
+| Dashboard | http://localhost:3000 (sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD`) |
+| API | http://localhost:3001/api (health: `/api/health`, readiness: `/api/health/ready`) |
+| Kibana | http://localhost:5601 (data view "TLS handshakes" is created by `logs:generate`) |
+| Elasticsearch | http://localhost:9200 |
+| PostgreSQL / Redis | `localhost:5434` / `localhost:6379` |
+
+```bash
+./scripts/check-health.sh   # checks every service
+docker compose down         # stop (add -v to delete the data volumes)
+```
+
+### Local development (hot reload)
 
 ```bash
 docker compose up -d postgres redis elasticsearch kibana
-
-cd backend && npm install && npm run start:dev     # http://localhost:3001/api
-cd frontend && npm install && npm run dev          # http://localhost:3000
+cd backend && npm run start:dev    # http://localhost:3001/api
+cd frontend && npm run dev         # http://localhost:3000
 ```
 
-The backend reads the root `.env`, where hosts are `localhost`. Inside Docker, `docker-compose.yml`
-overrides them with service names (`postgres`, `redis`, `elasticsearch`).
+The backend reads the root `.env` (hosts = `localhost`); inside Docker, compose overrides them with service names.
 
-## Tests
+## Configuration
+
+All settings come from environment variables (`.env`); see [.env.example](.env.example) for the full list.
+**No secrets live in code**, and the app validates its configuration at startup.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `JWT_SECRET` | *(required, 32+ chars)* | Signs access tokens |
+| `JWT_EXPIRES_IN` | `1h` | Access token lifetime |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | – | First admin, created only when no users exist |
+| `POSTGRES_*`, `REDIS_*`, `ELASTICSEARCH_NODE` | see `.env.example` | Connections (Postgres host port 5434) |
+| `CRYPTO_SIGNATURE_ALGORITHM` | `ECDSA-P256-SHA256` | `RSA-PSS-3072-SHA256`, `ML-DSA-65`, `HYBRID-ECDSA-P256+ML-DSA-65` |
+| `SCAN_TIMEOUT_MS` / `SCAN_CONCURRENCY` | `5000` / `10` | Per-connection timeout, parallel hosts per scan |
+| `SCAN_WORKER_CONCURRENCY` / `SCAN_JOB_ATTEMPTS` / `SCAN_RETRY_DELAY_MS` | `5` / `3` / `2000` | Queue worker, retries, backoff |
+| `SCAN_ALLOW_PRIVATE_TARGETS` | `false` | SSRF protection; `true` only for local testing |
+| `RATE_LIMIT` / `RATE_LIMIT_TTL_MS` | `100` / `60000` | Requests per IP per window (login: 5/min) |
+| `TRUST_PROXY_HOPS` | `0` | Set behind a load balancer so rate limits use the real client IP |
+
+## API
+
+All endpoints except login and health need `Authorization: Bearer <token>`. 🔒 = admin only (viewers get 403).
+Get a token:
 
 ```bash
-cd backend && npm test          # unit tests, no infrastructure needed
-cd frontend && npm test         # dashboard: reducer, API client, session, login form
-cd backend && npm run test:e2e  # real app + Postgres + Redis/BullMQ worker + Elasticsearch + Socket.IO (needs the Docker stack; uses a test DB, queue prefix and index)
+curl -s -X POST localhost:3001/api/auth/login -H 'content-type: application/json' \
+  -d '{"email":"admin@cryptoscope.local","password":"<ADMIN_PASSWORD>"}'
 ```
 
-The scanner tests start real TLS servers on `127.0.0.1` (TLS 1.3, TLS 1.0-only, PQ and non-PQ key exchange),
-so they cover the real handshake code without needing internet access.
+**Auth and users**
 
-## TLS scanner
+| Method | Path | Description |
+| --- | --- | --- |
+| POST | `/api/auth/login` | `{ email, password }` → `{ accessToken, tokenType, user }`. Public; 5 attempts/min |
+| GET | `/api/auth/me` | The current user |
+| POST / GET | `/api/users` | 🔒 Create (`{ email, password, role }`) / list users |
 
-Connects to each target, completes a TLS handshake and records:
+**Inventory and scanning**
 
-- protocol version, cipher suite and key exchange group
-- whether the server supports **hybrid post-quantum key exchange** (`X25519MLKEM768`)
-- certificate subject, issuer, SANs, validity dates, fingerprint
-- public key algorithm and size (RSA, EC, Ed25519, ML-DSA) and signature algorithm
-- trust result (`CERT_HAS_EXPIRED`, `DEPTH_ZERO_SELF_SIGNED_CERT`, ...) without refusing to connect
+| Method | Path | Description |
+| --- | --- | --- |
+| GET / POST | `/api/assets` | List (`search`, `riskLevel`, `environment`, `sort`, `order`, `page`, `pageSize`) / 🔒 create `{ host, port, label, environment }` |
+| GET / PATCH / DELETE | `/api/assets/:id` | Read / 🔒 update / 🔒 delete (cascades to scans and findings) |
+| POST | `/api/assets/:id/scans` | 🔒 Queue a scan → `202 { jobId, scanId, created }` |
+| POST | `/api/scan-jobs` | 🔒 Queue a batch `{ assetIds }` → `202 { batchId, total, jobs }` |
+| GET | `/api/scan-jobs`, `/api/scan-jobs/:jobId`, `/api/scan-jobs/batches/:batchId` | Queue counts, one job, batch progress |
+| GET | `/api/assets/:id/scans`, `/api/scans/:id` | Scan history; one scan with certificate and findings |
+| GET | `/api/findings` | Filters `severity`, `category`, `ruleId`, `assetId`, `from`, `to`, `latestOnly`; sort `createdAt` or `severity`; paginated |
+| GET | `/api/certificates/expiring` | Certificates in use expiring within `days` (default 30), most urgent first |
+| GET | `/api/dashboard/overview` | Totals, average risk, current findings, % quantum-vulnerable, expiring certificates |
+| POST | `/api/scanner/scan` | 🔒 Ad-hoc scan of up to 50 targets, with risk assessments (not stored) |
+| GET | `/api/scanner/seed-targets`, `/api/risk/rules` | Demo targets; risk rules and weights |
 
-Targets are scanned in parallel with a concurrency limit and a per-connection timeout
-(`SCAN_CONCURRENCY`, `SCAN_TIMEOUT_MS`). One failing host never affects the others.
+**TLS traffic analytics (Elasticsearch)**: all accept `from` and `to` (ISO 8601, default: last 7 days)
 
-From the command line (no server needed):
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/api/analytics/handshakes/key-algorithms` | Count by key algorithm (`terms`) with key sizes |
+| GET | `/api/analytics/handshakes/weak-per-interval` | Weak handshakes per `interval` (`date_histogram` + `filter`), by reason |
+| GET | `/api/analytics/handshakes/top-weak-rsa-hosts` | Top `limit` hosts still using RSA < 2048 |
+| GET | `/api/analytics/handshakes/quantum-vulnerable` | % of traffic with quantum-vulnerable key exchange, by group |
+| GET | `/api/analytics/handshakes/search` | Full-text `q` (query context) + `tlsVersion`, `host` filters (filter context) |
 
-```bash
-cd backend
-npm run scan                               # scan the seed targets
-npm run scan -- github.com example.com:8443
-npm run scan -- --json google.com          # full JSON output
-```
+**Crypto-agility**
 
-## Risk scoring
+| Method | Path | Description |
+| --- | --- | --- |
+| GET | `/api/crypto/providers` | Algorithms: family, quantum-safe, available, active, measured sizes and speed |
+| POST | `/api/crypto/sign` | 🔒 `{ message, algorithm? }` → `{ algorithm, keyId, signature, publicKey, quantumSafe }` |
+| POST | `/api/crypto/verify` | `{ message, algorithm, signature, keyId \| publicKey }` → `{ valid }` |
 
-Every successful scan is run through a rules engine ([backend/src/risk/rules.ts](backend/src/risk/rules.ts)).
-Each rule is a pure function that returns a finding (with evidence and a recommendation) or nothing.
+**Health**: `GET /api/health` (liveness) and `GET /api/health/ready` (readiness: Postgres, Redis, Elasticsearch) are public.
 
-| Rule                     | Severity                    | Why it matters                                           |
-| ------------------------ | --------------------------- | -------------------------------------------------------- |
-| `CERT_EXPIRED`           | critical                    | Clients reject the certificate                           |
-| `CERT_EXPIRING_SOON`     | high (< 30 days)            | Most common cause of outages                             |
-| `WEAK_RSA_KEY`           | high (< 2048 bits)          | Below NIST minimums                                      |
-| `WEAK_SIGNATURE_HASH`    | high (SHA-1), critical (MD5) | Practical collisions allow forged certificates          |
-| `LEGACY_TLS_VERSION`     | high (TLS 1.0/1.1), critical (SSLv3) | Deprecated by RFC 8996                          |
-| `CERT_SELF_SIGNED`       | medium                      | No trusted third party vouches for the server            |
-| `CERT_UNTRUSTED_CHAIN`   | medium                      | Any other chain validation failure                       |
-| `QUANTUM_VULNERABLE_KEY` | medium (any RSA / ECC key)  | Shor's algorithm breaks RSA and elliptic-curve keys      |
-| `NO_PQ_KEY_EXCHANGE`     | medium                      | "Harvest now, decrypt later" on recorded traffic         |
+**Live events**: Socket.IO namespace `/scans` (`io(url + "/scans", { auth: { token } })`) emits `scan.progress` and `batch.progress`.
 
-**Score (0–100)** = sum of finding weights (critical 50, high 25, medium 10, low 3), capped at 100.
-**Level** = the worst finding's severity, so a single critical issue is never hidden by a low score.
-Only a fully post-quantum server (ML-DSA certificate + hybrid ML-KEM key exchange, TLS 1.3) scores 0.
-
-## Data model (PostgreSQL)
-
-```mermaid
-erDiagram
-    assets ||--o{ scans : "has history of"
-    certificates ||--o{ scans : "seen in"
-    scans ||--o{ findings : produces
-    assets ||--o{ findings : "denormalised link"
-
-    assets {
-        uuid id PK
-        varchar host "unique with port"
-        int port
-        asset_environment environment
-        smallint latest_risk_score "copy of latest scan"
-        risk_level latest_risk_level
-        timestamptz last_scanned_at
-    }
-    scans {
-        uuid id PK
-        uuid asset_id FK "ON DELETE CASCADE"
-        uuid certificate_id FK "ON DELETE SET NULL"
-        scan_status status
-        timestamptz scanned_at
-        varchar protocol
-        boolean post_quantum_key_exchange
-        varchar error_code
-        smallint risk_score
-    }
-    certificates {
-        uuid id PK
-        varchar fingerprint_sha256 "unique"
-        timestamptz valid_to
-        varchar key_algorithm
-        int key_size
-        varchar signature_algorithm
-        boolean self_signed
-    }
-    findings {
-        uuid id PK
-        uuid scan_id FK
-        uuid asset_id FK
-        varchar rule_id
-        finding_severity severity
-        finding_category category
-        jsonb evidence
-        timestamptz created_at
-    }
-```
-
-- **Certificates are stored once per fingerprint** and shared by scans (an `INSERT ... ON CONFLICT` upsert).
-- **Every scan is kept**, including failed ones, so we have history. `assets.latest_risk_*` is a denormalised
-  copy of the newest successful scan, so listing assets by risk needs no join.
-- **Schema changes are migrations** in `backend/src/database/migrations` (`synchronize` is off). They run
-  automatically when the backend starts.
-
-```bash
-cd backend
-npm run migration:show                                         # what's applied
-npm run migration:generate -- src/database/migrations/AddX     # diff entities -> new migration
-npm run migration:revert                                       # undo the last one
-npm run seed                                                   # 20k assets, 100k scans, ~200k findings (~20 s)
-npm run db:explain-demo                                        # slow query -> index -> 214x faster
-```
-
-The query optimisation walkthrough (EXPLAIN ANALYZE before/after) is in
-[docs/query-optimization.md](docs/query-optimization.md).
-
-## Dashboard
-
-Open http://localhost:3000 and sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD` from your `.env`.
-
-- **Overview:** total assets, average risk score, current critical findings, % quantum-vulnerable assets (and
-  traffic), a key-algorithm chart and a weak-handshakes-per-hour chart (Elasticsearch), the riskiest assets and
-  certificates expiring soon.
-- **Assets:** search, filter, sort and page through the inventory; admins add assets and start scans (one, or a
-  selection as a batch).
-- **Findings:** filter by severity, category and rule; show only current findings or the full history.
-- **Live scan progress:** a floating panel shows every job's stage and the batch progress bar, pushed over Socket.IO.
-
-Design notes (token storage trade-offs, data flow, charts, CSP): [docs/dashboard.md](docs/dashboard.md).
+## Screenshots
 
 | Overview | Live scan progress |
 | --- | --- |
@@ -224,118 +232,129 @@ Design notes (token storage trade-offs, data flow, charts, CSP): [docs/dashboard
 | **Assets** | **Findings** |
 | ![Assets table sorted by risk](docs/screenshots/assets.jpg) | ![Findings filtered to critical and high](docs/screenshots/findings.jpg) |
 
-## Crypto-agility (RSA → ECDSA → ML-DSA without code changes)
+## Data model
 
-Application code signs through one `CryptoProvider` interface. The algorithm for new signatures is configuration:
+```mermaid
+erDiagram
+    assets ||--o{ scans : "has history of"
+    certificates ||--o{ scans : "seen in"
+    scans ||--o{ findings : produces
+    assets ||--o{ findings : "denormalised link"
+    assets |o--o| scans : "latest_scan_id"
 
-```bash
-CRYPTO_SIGNATURE_ALGORITHM=ECDSA-P256-SHA256   # or RSA-PSS-3072-SHA256, ML-DSA-65, HYBRID-ECDSA-P256+ML-DSA-65
+    assets {
+        uuid id PK
+        varchar host "unique with port"
+        int port
+        smallint latest_risk_score "copy of latest scan"
+        uuid latest_scan_id FK
+    }
+    scans {
+        uuid id PK
+        uuid asset_id FK "ON DELETE CASCADE"
+        uuid certificate_id FK "ON DELETE SET NULL"
+        scan_status status
+        varchar protocol
+        boolean post_quantum_key_exchange
+        smallint risk_score
+    }
+    certificates {
+        uuid id PK
+        varchar fingerprint_sha256 "unique"
+        timestamptz valid_to
+        varchar key_algorithm
+        varchar signature_algorithm
+    }
+    findings {
+        uuid id PK
+        uuid scan_id FK
+        uuid asset_id FK
+        finding_severity severity
+        varchar rule_id
+        jsonb evidence
+    }
+    users {
+        uuid id PK
+        varchar email "unique"
+        varchar password_hash "scrypt"
+        user_role role
+    }
 ```
 
-- Providers: **RSA-PSS-3072**, **ECDSA P-256**, **ML-DSA-65** (FIPS 204, post-quantum, real on Node.js 24) and a
-  **hybrid ECDSA + ML-DSA** composite where both signatures must verify.
-- Every signature names its algorithm, so after switching to ML-DSA, old ECDSA signatures still verify (verified in Docker).
-- `GET /api/crypto/providers` compares them live: ML-DSA-65 signatures are 3,309 bytes vs 71 for ECDSA.
+Certificates are stored once per fingerprint; every scan is kept as history; `latest_*` columns are deliberate
+denormalised copies for fast dashboards. Schema changes are hand-written migrations, checked against the entities.
+One slow query and its fix (an index, **214x faster**, `EXPLAIN ANALYZE` before/after) is documented in
+[docs/query-optimization.md](docs/query-optimization.md).
 
-How ML-DSA plugs in, hybrid signatures, and the size/speed trade-offs: [docs/crypto-agility.md](docs/crypto-agility.md).
+## Testing
 
-## Security
+| Suite | Command | Count | Covers |
+| --- | --- | --- | --- |
+| Backend unit | `cd backend && npm test` | 223 | Scanner (real local TLS servers), DER parser, every risk rule, mappers, query builders, worker retry policy, scrypt, JWT config, SSRF policy, crypto providers (shared contract tests) |
+| Backend e2e | `cd backend && npm run test:e2e` | 57 | Real app + Postgres + Redis/BullMQ + Elasticsearch + Socket.IO: CRUD, async scans, retries, analytics with exact counts, auth/roles, an audit of every route, rate limits, sign/verify |
+| Frontend | `cd frontend && npm test` | 23 | Live-event reducer, API client, session/JWT expiry, chart helpers, login form |
 
-- **JWT authentication**, secure by default: every route needs a token unless marked `@Public()`.
-- **Roles:** `admin` scans and manages assets and users; `viewer` can only read. An e2e test audits every route.
-- **Passwords** hashed with scrypt (memory-hard, OWASP parameters, re-hashed when parameters are raised).
-- **Rate limiting** in Redis: 100 requests/min per IP, 5 login attempts/min.
-- **helmet** security headers, strict CORS, 100 kB body limit, validated DTOs that reject unknown fields.
-- **SSRF protection:** the scanner refuses private, loopback and cloud-metadata addresses and pins the resolved IP (no DNS rebinding).
-- **No secrets in code:** everything comes from `.env`; the app refuses to start without a strong `JWT_SECRET`.
+**CI** (GitHub Actions, [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs, on every push and PR:
 
-Details, design choices and the "not production-ready yet" list: [docs/security.md](docs/security.md).
+- backend type-check, unit tests and build on **Node 22 and 24** (on 24 the real ML-DSA tests run too);
+- frontend lint, tests and production build;
+- the e2e suite against real Postgres, Redis and Elasticsearch service containers;
+- `npm audit` of production dependencies.
 
-## Async scan pipeline (BullMQ + Socket.IO)
+## Project structure
 
-Scans run in the background. `POST /api/assets/:id/scans` (or `POST /api/scan-jobs` for many assets) puts a job
-in a **BullMQ** queue on Redis and returns `202 Accepted` immediately. A worker then:
-
-1. scans the host (temporary network errors are **retried with exponential backoff**);
-2. saves scan + certificate + findings + asset risk in **one Postgres transaction**;
-3. bulk-indexes the findings into **Elasticsearch** (`cryptoscope-findings`);
-4. reports each stage, and progress is pushed live to the browser over **Socket.IO** (namespace `/scans`).
-
-Every step is idempotent, so retries never duplicate data, and duplicate requests for the same asset are deduplicated.
-
-```bash
-cd backend && CRYPTOSCOPE_TOKEN=<accessToken> npm run scans:watch    # print live scan events
+```
+CryptoScope/
+├── backend/                  NestJS API (Node.js 24 in Docker)
+│   ├── src/scanner/          TLS scanner, DER certificate parser, SSRF policy
+│   ├── src/risk/             risk rules + scoring engine
+│   ├── src/assets|scans|findings/   inventory REST API (TypeORM)
+│   ├── src/database/         migrations, seed (350k+ rows), EXPLAIN demo
+│   ├── src/analytics/        Elasticsearch mapping, log generator, aggregations
+│   ├── src/scan-jobs/        BullMQ producer/worker, Socket.IO gateway
+│   ├── src/auth|users/       JWT, roles, scrypt
+│   ├── src/crypto-agility/   CryptoProvider: RSA, ECDSA, ML-DSA, hybrid
+│   └── test/                 e2e suites
+├── frontend/                 Next.js 16 dashboard (Tailwind, Recharts, Socket.IO client)
+├── docs/                     design notes per topic + screenshots
+├── scripts/check-health.sh   smoke test for the whole stack
+├── .github/workflows/ci.yml  CI
+└── docker-compose.yml        the whole stack: one `docker compose up`
 ```
 
-Design, failure handling and scaling: [docs/async-pipeline.md](docs/async-pipeline.md).
+## Design documents
 
-## TLS handshake analytics (Elasticsearch)
+| Topic | Document |
+| --- | --- |
+| Query optimisation (EXPLAIN ANALYZE, composite index) | [docs/query-optimization.md](docs/query-optimization.md) |
+| Elasticsearch mapping, aggregations, query vs filter context | [docs/elasticsearch.md](docs/elasticsearch.md) |
+| Async pipeline: retries, idempotency, real-time | [docs/async-pipeline.md](docs/async-pipeline.md) |
+| Security: auth, roles, scrypt, SSRF, secrets, production gaps | [docs/security.md](docs/security.md) |
+| Dashboard: data flow, token storage, charts, CSP | [docs/dashboard.md](docs/dashboard.md) |
+| Crypto-agility and post-quantum signatures | [docs/crypto-agility.md](docs/crypto-agility.md) |
 
-PostgreSQL holds the inventory; Elasticsearch holds the **traffic**: one document per TLS handshake.
+## How it was built
 
-```bash
-cd backend
-npm run logs:generate    # 500,000 fake handshakes over the last 7 days, bulk-indexed in ~5 s
-```
+Step by step, one reviewed pull request per step:
 
-- Explicit mapping (`keyword` vs `text`, `ip`, `date`, `dynamic: strict`) in a versioned index behind the
-  `tls-handshakes` alias. Re-generating swaps the alias atomically (zero downtime).
-- Four aggregation endpoints: key algorithm counts (`terms`), weak handshakes per hour
-  (`date_histogram` + `filter`), top hosts with RSA < 2048, and the share of quantum-vulnerable traffic.
-- A search endpoint that shows **query context** (scored full-text) and **filter context** (exact, cacheable) side by side.
-- The script also creates a Kibana data view, so the logs are ready in Discover.
+1. Project setup: monorepo, docker-compose, health checks
+2. [TLS scanner with post-quantum key exchange detection](https://github.com/mnahsanofficial/CryptoScope/pull/1)
+3. [Rule-based risk scoring](https://github.com/mnahsanofficial/CryptoScope/pull/2)
+4. [PostgreSQL data model, REST API, 214x query optimisation](https://github.com/mnahsanofficial/CryptoScope/pull/3)
+5. [Elasticsearch TLS handshake analytics](https://github.com/mnahsanofficial/CryptoScope/pull/4)
+6. [Async pipeline with BullMQ and Socket.IO](https://github.com/mnahsanofficial/CryptoScope/pull/5)
+7. [Security: JWT roles, scrypt, rate limiting, SSRF protection](https://github.com/mnahsanofficial/CryptoScope/pull/6)
+8. [Next.js dashboard](https://github.com/mnahsanofficial/CryptoScope/pull/7)
+9. [Crypto-agility with ML-DSA and hybrid signatures](https://github.com/mnahsanofficial/CryptoScope/pull/8)
+10. Final polish: README, architecture, CI
 
-Mapping decisions, query vs filter context and optimisation tips: [docs/elasticsearch.md](docs/elasticsearch.md).
+## Limitations
 
-## API
+This is a learning and portfolio project, not a production service. Notable gaps (see the honest list in
+[docs/security.md](docs/security.md#10-not-production-ready-yet-honest-list)):
 
-All endpoints except login and health need `Authorization: Bearer <token>`. 🔒 = admin only.
-
-| Method | Path                | Description                                                      |
-| ------ | ------------------- | ---------------------------------------------------------------- |
-| POST   | `/api/auth/login`   | `{ email, password }` → `{ accessToken, tokenType, user }`. Public, max 5 attempts/min. |
-| GET    | `/api/auth/me`      | The current user. |
-| POST   | `/api/users`        | 🔒 Create a user: `{ email, password (12+ chars), role: "admin" \| "viewer" }`. |
-| GET    | `/api/users`        | 🔒 List users. |
-| GET    | `/api/health`       | Liveness: the process is up. Used by Docker's healthcheck.       |
-| GET    | `/api/health/ready` | Readiness: Postgres, Redis and Elasticsearch reachable (or 503). |
-| GET    | `/api/scanner/seed-targets` | The demo target list.                                    |
-| POST   | `/api/scanner/scan` | 🔒 Scan up to 50 targets: `{ "targets": ["github.com", "host:8443"] }`. Each result includes its risk assessment. |
-| GET    | `/api/risk/rules`   | All risk rules with severity, category and rationale, plus the score weights. |
-| POST   | `/api/assets`       | 🔒 Create an asset: `{ "host": "github.com", "port": 443, "label": "...", "environment": "production" }` |
-| GET    | `/api/assets`       | List assets. Filters: `search`, `riskLevel` (comma list), `environment`. Sort: `riskScore`, `host`, `lastScannedAt`, `createdAt`. Paging: `page`, `pageSize` (max 100), `order`. |
-| GET    | `/api/assets/:id`   | One asset. |
-| PATCH  | `/api/assets/:id`   | 🔒 Update host, port, label or environment. |
-| DELETE | `/api/assets/:id`   | 🔒 Delete an asset with its scans and findings. |
-| POST   | `/api/assets/:id/scans` | 🔒 **Queue** a scan of the asset: `202 { jobId, scanId, created }`. Progress arrives over Socket.IO. |
-| POST   | `/api/scan-jobs`    | 🔒 Queue scans for many assets: `{ "assetIds": [...] }` (max 1000): `202 { batchId, total, jobs }`. |
-| GET    | `/api/scan-jobs`    | Job counts by state: waiting, active, delayed (waiting to retry), completed, failed. |
-| GET    | `/api/scan-jobs/:jobId` | One job: state, progress, attempts, result or failure reason. |
-| GET    | `/api/scan-jobs/batches/:batchId` | Batch totals: `{ total, completed, failed, percent }`. |
-| GET    | `/api/assets/:id/scans` | Scan history, newest first (paginated). |
-| GET    | `/api/scans/:id`    | One scan with its certificate and findings. |
-| GET    | `/api/analytics/handshakes/key-algorithms` | Handshake count per key algorithm, with key sizes. All analytics endpoints accept `from`, `to` (ISO 8601, default last 7 days). |
-| GET    | `/api/analytics/handshakes/weak-per-interval` | Weak handshakes per `interval` (`1h` default, up to `1d`), plus totals by reason. |
-| GET    | `/api/analytics/handshakes/top-weak-rsa-hosts` | Top `limit` (default 10) hosts still using RSA < 2048. |
-| GET    | `/api/analytics/handshakes/quantum-vulnerable` | Percentage of traffic using a quantum-vulnerable key exchange, by group. |
-| GET    | `/api/analytics/handshakes/search` | Log search: `q` (full-text on user agent), `tlsVersion`, `host`, `page`, `pageSize`. |
-| GET    | `/api/dashboard/overview` | Totals, average risk, current findings by severity, % quantum-vulnerable assets, expiring/expired certificates. |
-| GET    | `/api/certificates/expiring` | Certificates in use that expire within `days` (default 30); `includeExpired` (default true); most urgent first. |
-| GET    | `/api/crypto/providers` | Signature algorithms: family, quantum-safe, available, active, measured key/signature sizes and speed. |
-| POST   | `/api/crypto/sign`  | 🔒 `{ message, algorithm? }` → `{ algorithm, keyId, signature, publicKey, quantumSafe }` (active algorithm unless overridden). |
-| POST   | `/api/crypto/verify` | `{ message, algorithm, signature, keyId \| publicKey }` → `{ valid }`. Uses the algorithm named in the signature. |
-| GET    | `/api/findings`     | List findings. Filters: `severity`, `category`, `ruleId` (comma lists), `assetId`, `from`, `to`, `latestOnly` (current findings only). Sort: `createdAt`, `severity`. Paginated. |
-
-## Roadmap
-
-- [x] Step 1 – Project setup, docker-compose, health checks
-- [x] Step 2 – TLS scanner service
-- [x] Step 3 – Risk scoring engine
-- [x] Step 4 – PostgreSQL data model + query optimization
-- [x] Step 5 – Elasticsearch log analytics
-- [x] Step 6 – Async pipeline (BullMQ) + real-time (Socket.IO)
-- [x] Step 7 – Security (JWT, roles, validation, rate limiting)
-- [x] Step 8 – Dashboard
-- [x] Step 9 – Crypto-agility module
-- [ ] Step 10 – Final polish
-
+- Elasticsearch, Kibana and Redis run without authentication or TLS (local development only).
+- Signing keys are generated in memory; production needs a KMS/HSM, persistence and rotation.
+- Access tokens only (no refresh tokens or revocation) stored in `sessionStorage`; a backend-for-frontend with
+  httpOnly cookies would be stronger.
+- Scan targets are TLS endpoints only (no SSH, code signing, or source-code crypto discovery).
