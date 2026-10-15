@@ -218,6 +218,12 @@ Open http://localhost:3000 and sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD` fro
 
 Design notes (token storage trade-offs, data flow, charts, CSP): [docs/dashboard.md](docs/dashboard.md).
 
+| Overview | Live scan progress |
+| --- | --- |
+| ![Overview: KPI tiles, key-algorithm and weak-handshake charts](docs/screenshots/overview.jpg) | ![Findings page while a batch scan runs, with retries shown live](docs/screenshots/live-scan.jpg) |
+| **Assets** | **Findings** |
+| ![Assets table sorted by risk](docs/screenshots/assets.jpg) | ![Findings filtered to critical and high](docs/screenshots/findings.jpg) |
+
 ## Security
 
 - **JWT authentication**, secure by default: every route needs a token unless marked `@Public()`.
