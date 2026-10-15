@@ -108,6 +108,7 @@ describe('Security (e2e)', () => {
       ['POST', '/api/scanner/scan'],
       ['POST', '/api/users'],
       ['GET', '/api/users'],
+      ['POST', '/api/crypto/sign'],
     ])('forbids a viewer from %s %s', async (method, path) => {
       const req = viewer()[method.toLowerCase() as 'get' | 'post' | 'patch' | 'delete'](path);
       await req.send({}).expect(403);
@@ -188,5 +189,46 @@ describe('Security (e2e)', () => {
       expect(await connect({ token: 'garbage' })).toBe('Unauthorized: invalid or expired token');
       expect(await connect({ token: tokens.viewer })).toBe('connected');
     });
+  });
+});
+
+describe('Crypto-agility API (e2e)', () => {
+  let app: INestApplication;
+  let tokens: TestTokens;
+
+  beforeAll(async () => {
+    ({ app, tokens } = await bootTestApp());
+  });
+
+  afterAll(async () => {
+    if (app) await cleanUpTestQueue(app);
+    await app?.close();
+  });
+
+  it('lists providers with the active one marked', async () => {
+    const { body } = await client(app, tokens.viewer).get('/api/crypto/providers').expect(200);
+
+    expect(body.map((p: { algorithm: string }) => p.algorithm)).toContain('ML-DSA-65');
+    expect(body.find((p: { active: boolean }) => p.active)).toMatchObject({ algorithm: 'ECDSA-P256-SHA256', available: true });
+  });
+
+  it('admin signs; a viewer verifies; tampering is detected', async () => {
+    const signed = await client(app, tokens.admin).post('/api/crypto/sign').send({ message: 'scan report #42' }).expect(200);
+    expect(signed.body).toMatchObject({ algorithm: 'ECDSA-P256-SHA256', quantumSafe: false });
+
+    const envelope = { algorithm: signed.body.algorithm, signature: signed.body.signature, keyId: signed.body.keyId };
+    const ok = await client(app, tokens.viewer).post('/api/crypto/verify').send({ message: 'scan report #42', ...envelope }).expect(200);
+    const tampered = await client(app, tokens.viewer).post('/api/crypto/verify').send({ message: 'scan report #43', ...envelope }).expect(200);
+
+    expect(ok.body.valid).toBe(true);
+    expect(tampered.body.valid).toBe(false);
+  });
+
+  it('rejects unknown algorithms and bad signatures at the validation layer', async () => {
+    await client(app, tokens.admin).post('/api/crypto/sign').send({ message: 'x', algorithm: 'MD5-RSA' }).expect(400);
+    await client(app, tokens.viewer)
+      .post('/api/crypto/verify')
+      .send({ message: 'x', algorithm: 'ECDSA-P256-SHA256', signature: 'not base64!!', keyId: '0123456789abcdef' })
+      .expect(400);
   });
 });

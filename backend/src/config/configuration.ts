@@ -32,6 +32,10 @@ export interface AppConfig {
     /** Optional: creates this admin on startup if no users exist yet. */
     bootstrapAdmin: { email: string; password: string } | null;
   };
+  crypto: {
+    /** Algorithm for NEW signatures, e.g. ECDSA-P256-SHA256 or ML-DSA-65. Checked at startup. */
+    signatureAlgorithm: string;
+  };
   security: {
     /** Requests allowed per client IP per window (global default). */
     rateLimit: { limit: number; ttlMs: number };
@@ -128,6 +132,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       jwtSecret: jwtSecret(env),
       jwtExpiresIn: env.JWT_EXPIRES_IN ?? '1h',
       bootstrapAdmin: bootstrapAdmin(env),
+    },
+    crypto: {
+      signatureAlgorithm: env.CRYPTO_SIGNATURE_ALGORITHM ?? 'ECDSA-P256-SHA256',
     },
     security: {
       rateLimit: {

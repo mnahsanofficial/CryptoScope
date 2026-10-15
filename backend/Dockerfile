@@ -1,5 +1,6 @@
+# Node.js 24 (LTS) because it exposes ML-DSA (FIPS 204) in node:crypto, used by the crypto-agility module.
 # ---- Stage 1: install all deps and compile TypeScript ----
-FROM node:22-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -7,7 +8,7 @@ COPY . .
 RUN npm run build && npm prune --omit=dev
 
 # ---- Stage 2: small runtime image with only compiled JS + production deps ----
-FROM node:22-alpine AS runtime
+FROM node:24-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=node:node /app/package.json ./
