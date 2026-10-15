@@ -76,7 +76,7 @@ overrides them with service names (`postgres`, `redis`, `elasticsearch`).
 
 ```bash
 cd backend && npm test          # unit tests, no infrastructure needed
-cd backend && npm run test:e2e  # real app + real Postgres (needs the Docker stack; uses a separate cryptoscope_test DB)
+cd backend && npm run test:e2e  # real app + real Postgres and Elasticsearch (needs the Docker stack; uses a test DB and a temporary index)
 ```
 
 The scanner tests start real TLS servers on `127.0.0.1` (TLS 1.3, TLS 1.0-only, PQ and non-PQ key exchange),
@@ -193,6 +193,24 @@ npm run db:explain-demo                                        # slow query -> i
 The query optimisation walkthrough (EXPLAIN ANALYZE before/after) is in
 [docs/query-optimization.md](docs/query-optimization.md).
 
+## TLS handshake analytics (Elasticsearch)
+
+PostgreSQL holds the inventory; Elasticsearch holds the **traffic**: one document per TLS handshake.
+
+```bash
+cd backend
+npm run logs:generate    # 500,000 fake handshakes over the last 7 days, bulk-indexed in ~5 s
+```
+
+- Explicit mapping (`keyword` vs `text`, `ip`, `date`, `dynamic: strict`) in a versioned index behind the
+  `tls-handshakes` alias. Re-generating swaps the alias atomically (zero downtime).
+- Four aggregation endpoints: key algorithm counts (`terms`), weak handshakes per hour
+  (`date_histogram` + `filter`), top hosts with RSA < 2048, and the share of quantum-vulnerable traffic.
+- A search endpoint that shows **query context** (scored full-text) and **filter context** (exact, cacheable) side by side.
+- The script also creates a Kibana data view, so the logs are ready in Discover.
+
+Mapping decisions, query vs filter context and optimisation tips: [docs/elasticsearch.md](docs/elasticsearch.md).
+
 ## API
 
 | Method | Path                | Description                                                      |
@@ -210,6 +228,11 @@ The query optimisation walkthrough (EXPLAIN ANALYZE before/after) is in
 | POST   | `/api/assets/:id/scans` | Scan the asset now and store the scan, certificate and findings. |
 | GET    | `/api/assets/:id/scans` | Scan history, newest first (paginated). |
 | GET    | `/api/scans/:id`    | One scan with its certificate and findings. |
+| GET    | `/api/analytics/handshakes/key-algorithms` | Handshake count per key algorithm, with key sizes. All analytics endpoints accept `from`, `to` (ISO 8601, default last 7 days). |
+| GET    | `/api/analytics/handshakes/weak-per-interval` | Weak handshakes per `interval` (`1h` default, up to `1d`), plus totals by reason. |
+| GET    | `/api/analytics/handshakes/top-weak-rsa-hosts` | Top `limit` (default 10) hosts still using RSA < 2048. |
+| GET    | `/api/analytics/handshakes/quantum-vulnerable` | Percentage of traffic using a quantum-vulnerable key exchange, by group. |
+| GET    | `/api/analytics/handshakes/search` | Log search: `q` (full-text on user agent), `tlsVersion`, `host`, `page`, `pageSize`. |
 | GET    | `/api/findings`     | List findings. Filters: `severity`, `category`, `ruleId` (comma lists), `assetId`, `from`, `to`. Sort: `createdAt`, `severity`. Paginated. |
 
 ## Roadmap
@@ -218,7 +241,7 @@ The query optimisation walkthrough (EXPLAIN ANALYZE before/after) is in
 - [x] Step 2 – TLS scanner service
 - [x] Step 3 – Risk scoring engine
 - [x] Step 4 – PostgreSQL data model + query optimization
-- [ ] Step 5 – Elasticsearch log analytics
+- [x] Step 5 – Elasticsearch log analytics
 - [ ] Step 6 – Async pipeline (BullMQ) + real-time (Socket.IO)
 - [ ] Step 7 – Security (JWT, roles, validation, rate limiting)
 - [ ] Step 8 – Dashboard

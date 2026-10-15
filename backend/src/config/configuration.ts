@@ -14,6 +14,8 @@ export interface AppConfig {
   };
   elasticsearch: {
     node: string;
+    /** Alias the handshake-log analytics read from (points at a versioned index). */
+    handshakeIndex: string;
   };
   scanner: {
     timeoutMs: number;
@@ -67,6 +69,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     elasticsearch: {
       node: required(env, 'ELASTICSEARCH_NODE'),
+      handshakeIndex: env.HANDSHAKE_INDEX ?? 'tls-handshakes',
     },
     scanner: {
       timeoutMs: toPositiveInt(env.SCAN_TIMEOUT_MS ?? '5000', 'SCAN_TIMEOUT_MS'),
