@@ -9,6 +9,7 @@ const validEnv: NodeJS.ProcessEnv = {
   REDIS_HOST: 'localhost',
   REDIS_PORT: '6379',
   ELASTICSEARCH_NODE: 'http://localhost:9200',
+  JWT_SECRET: 'x'.repeat(32),
 };
 
 describe('loadConfig', () => {
@@ -24,6 +25,22 @@ describe('loadConfig', () => {
     const { POSTGRES_PASSWORD: _omit, ...env } = validEnv;
 
     expect(() => loadConfig(env)).toThrow('Missing required environment variable: POSTGRES_PASSWORD');
+  });
+
+  it('requires a JWT secret of at least 32 characters', () => {
+    expect(() => loadConfig({ ...validEnv, JWT_SECRET: 'short' })).toThrow('at least 32 characters');
+    const { JWT_SECRET: _omit, ...env } = validEnv;
+    expect(() => loadConfig(env)).toThrow('Missing required environment variable: JWT_SECRET');
+  });
+
+  it('bootstrap admin needs both email and password', () => {
+    expect(loadConfig(validEnv).auth.bootstrapAdmin).toBeNull();
+    expect(() => loadConfig({ ...validEnv, ADMIN_EMAIL: 'a@b.c' })).toThrow('ADMIN_EMAIL and ADMIN_PASSWORD');
+  });
+
+  it('keeps SSRF protection on unless explicitly disabled', () => {
+    expect(loadConfig(validEnv).scanner.allowPrivateTargets).toBe(false);
+    expect(loadConfig({ ...validEnv, SCAN_ALLOW_PRIVATE_TARGETS: 'true' }).scanner.allowPrivateTargets).toBe(true);
   });
 
   it('rejects an invalid port', () => {

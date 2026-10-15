@@ -90,6 +90,15 @@ services:
       SCAN_WORKER_CONCURRENCY: ${SCAN_WORKER_CONCURRENCY:-5}
       SCAN_JOB_ATTEMPTS: ${SCAN_JOB_ATTEMPTS:-3}
       SCAN_RETRY_DELAY_MS: ${SCAN_RETRY_DELAY_MS:-2000}
+      SCAN_ALLOW_PRIVATE_TARGETS: ${SCAN_ALLOW_PRIVATE_TARGETS:-false}
+      # Secrets come only from .env (never from code or this file).
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env (openssl rand -base64 48)}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-1h}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      RATE_LIMIT: ${RATE_LIMIT:-100}
+      RATE_LIMIT_TTL_MS: ${RATE_LIMIT_TTL_MS:-60000}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-0}
     ports:
       - "${BACKEND_PORT:-3001}:${BACKEND_PORT:-3001}"
     depends_on:

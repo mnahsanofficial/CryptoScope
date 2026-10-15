@@ -1,6 +1,11 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
+import { Public } from '../auth/decorators';
 import { HealthService, ReadinessReport } from './health.service';
 
+// Probes (Docker, Kubernetes, load balancers) call these without a token, every few seconds.
+@Public()
+@SkipThrottle()
 @Controller('health')
 export class HealthController {
   constructor(private readonly health: HealthService) {}

@@ -22,6 +22,21 @@ export interface AppConfig {
   scanner: {
     timeoutMs: number;
     concurrency: number;
+    /** Allow scanning private/loopback/link-local addresses. Off by default: SSRF protection. */
+    allowPrivateTargets: boolean;
+  };
+  auth: {
+    jwtSecret: string;
+    /** e.g. "1h", "15m". Short-lived tokens limit the damage of a leaked token. */
+    jwtExpiresIn: string;
+    /** Optional: creates this admin on startup if no users exist yet. */
+    bootstrapAdmin: { email: string; password: string } | null;
+  };
+  security: {
+    /** Requests allowed per client IP per window (global default). */
+    rateLimit: { limit: number; ttlMs: number };
+    /** Trust X-Forwarded-For from this many proxy hops (needed behind a load balancer). 0 = off. */
+    trustProxyHops: number;
   };
   queue: {
     /** Redis key prefix for BullMQ. Different prefixes = fully separate queues (used by the e2e tests). */
@@ -59,6 +74,26 @@ function toPositiveInt(value: string, key: string): number {
   return n;
 }
 
+const MIN_JWT_SECRET_LENGTH = 32;
+
+function jwtSecret(env: NodeJS.ProcessEnv): string {
+  const secret = required(env, 'JWT_SECRET');
+  if (secret.length < MIN_JWT_SECRET_LENGTH) {
+    throw new Error(`JWT_SECRET must be at least ${MIN_JWT_SECRET_LENGTH} characters (try: openssl rand -base64 48)`);
+  }
+  return secret;
+}
+
+function bootstrapAdmin(env: NodeJS.ProcessEnv): AppConfig['auth']['bootstrapAdmin'] {
+  const email = env.ADMIN_EMAIL?.trim();
+  const password = env.ADMIN_PASSWORD;
+  if (!email && !password) return null;
+  if (!email || !password) throw new Error('Set both ADMIN_EMAIL and ADMIN_PASSWORD, or neither');
+  return { email, password };
+}
+
+const toBool = (value: string | undefined): boolean => value === 'true' || value === '1';
+
 /**
  * Builds a typed config object from environment variables.
  * Fails fast at startup so a misconfigured container crashes immediately
@@ -87,6 +122,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     scanner: {
       timeoutMs: toPositiveInt(env.SCAN_TIMEOUT_MS ?? '5000', 'SCAN_TIMEOUT_MS'),
       concurrency: toPositiveInt(env.SCAN_CONCURRENCY ?? '10', 'SCAN_CONCURRENCY'),
+      allowPrivateTargets: toBool(env.SCAN_ALLOW_PRIVATE_TARGETS),
+    },
+    auth: {
+      jwtSecret: jwtSecret(env),
+      jwtExpiresIn: env.JWT_EXPIRES_IN ?? '1h',
+      bootstrapAdmin: bootstrapAdmin(env),
+    },
+    security: {
+      rateLimit: {
+        limit: toPositiveInt(env.RATE_LIMIT ?? '100', 'RATE_LIMIT'),
+        ttlMs: toPositiveInt(env.RATE_LIMIT_TTL_MS ?? '60000', 'RATE_LIMIT_TTL_MS'),
+      },
+      trustProxyHops: Number(env.TRUST_PROXY_HOPS ?? '0'),
     },
     queue: {
       prefix: env.QUEUE_PREFIX ?? 'cryptoscope',

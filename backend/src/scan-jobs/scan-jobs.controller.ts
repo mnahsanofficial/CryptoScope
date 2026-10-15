@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ArrayMaxSize, ArrayNotEmpty, IsArray, IsUUID } from 'class-validator';
+import { Roles } from '../auth/decorators';
 import { ScanQueueService } from './scan-queue.service';
 
 export class EnqueueBatchDto {
@@ -20,6 +21,7 @@ export class ScanJobsController {
 
   // POST /api/assets/:assetId/scans  -> 202 { jobId, scanId, created }
   @Post('assets/:assetId/scans')
+  @Roles('admin')
   @HttpCode(202)
   scanAsset(@Param('assetId', ParseUUIDPipe) assetId: string) {
     return this.queue.enqueueAsset(assetId);
@@ -27,6 +29,7 @@ export class ScanJobsController {
 
   // POST /api/scan-jobs  { "assetIds": [...] }  -> 202 { batchId, total, jobs }
   @Post('scan-jobs')
+  @Roles('admin')
   @HttpCode(202)
   scanMany(@Body() body: EnqueueBatchDto) {
     return this.queue.enqueueBatch(body.assetIds);

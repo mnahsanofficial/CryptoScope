@@ -5,20 +5,20 @@
  * Uses a separate database, queue prefix and index (see helpers.ts), so it never touches dev data.
  */
 import { INestApplication } from '@nestjs/common';
-import request from 'supertest';
 import * as tls from 'node:tls';
 import { DataSource } from 'typeorm';
-import { bootTestApp, cleanUpTestQueue, closedPort, scanAndWait, startTlsServer } from './helpers';
+import { bootTestApp, cleanUpTestQueue, client, closedPort, scanAndWait, startTlsServer, TestTokens } from './helpers';
 
 describe('CryptoScope API (e2e)', () => {
   let app: INestApplication;
   let db: DataSource;
   let tlsServer: tls.Server;
   let tlsPort: number;
+  let tokens: TestTokens;
 
   beforeAll(async () => {
     ({ server: tlsServer, port: tlsPort } = await startTlsServer());
-    ({ app, db } = await bootTestApp()); // runs migrations (migrationsRun: true) and starts the worker
+    ({ app, db, tokens } = await bootTestApp()); // runs migrations (migrationsRun: true) and starts the worker
   });
 
   afterAll(async () => {
@@ -31,7 +31,7 @@ describe('CryptoScope API (e2e)', () => {
     await db.query('TRUNCATE findings, scans, certificates, assets');
   });
 
-  const api = () => request(app.getHttpServer());
+  const api = () => client(app, tokens.admin);
   const createAsset = async (body: object) => (await api().post('/api/assets').send(body).expect(201)).body;
 
   describe('assets CRUD', () => {
@@ -77,7 +77,7 @@ describe('CryptoScope API (e2e)', () => {
     it('scans an asset and stores scan, certificate, findings and the latest risk', async () => {
       const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
 
-      const { job, scan } = await scanAndWait(app, asset.id);
+      const { job, scan } = await scanAndWait(app, tokens.admin, asset.id);
 
       expect(job.state).toBe('completed');
       expect(scan).toMatchObject({ status: 'success', protocol: 'TLSv1.3', riskScore: 30, riskLevel: 'medium' });
@@ -93,8 +93,8 @@ describe('CryptoScope API (e2e)', () => {
     it('stores a certificate once even when it is seen in many scans', async () => {
       const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
 
-      await scanAndWait(app, asset.id);
-      await scanAndWait(app, asset.id);
+      await scanAndWait(app, tokens.admin, asset.id);
+      await scanAndWait(app, tokens.admin, asset.id);
 
       const [{ scans, certificates }] = await db.query(
         'SELECT (SELECT COUNT(*)::int FROM scans) AS scans, (SELECT COUNT(*)::int FROM certificates) AS certificates',
@@ -107,11 +107,11 @@ describe('CryptoScope API (e2e)', () => {
 
     it('records a failed scan without changing the last known risk', async () => {
       const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
-      await scanAndWait(app, asset.id);
+      await scanAndWait(app, tokens.admin, asset.id);
 
       // Point the asset at a port where nothing listens, so the next scan is refused
       await api().patch(`/api/assets/${asset.id}`).send({ port: await closedPort() }).expect(200);
-      const { job, scan: failed } = await scanAndWait(app, asset.id);
+      const { job, scan: failed } = await scanAndWait(app, tokens.admin, asset.id);
 
       // "Refused" may be temporary, so the worker retried before saving it as a failed scan
       expect(job).toMatchObject({ state: 'completed', attemptsMade: 3 });
@@ -131,7 +131,7 @@ describe('CryptoScope API (e2e)', () => {
     beforeEach(async () => {
       const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
       assetId = asset.id;
-      await scanAndWait(app, assetId);
+      await scanAndWait(app, tokens.admin, assetId);
     });
 
     it('filters by category and includes the asset host', async () => {

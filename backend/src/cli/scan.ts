@@ -53,7 +53,12 @@ async function main(): Promise<void> {
   const inputs = args.filter((a) => a !== '--json');
   const targets = inputs.length > 0 ? inputs : [...SEED_TARGETS];
 
-  const scanner = new TlsScannerService({ timeoutMs: 8_000, concurrency: 10, probePostQuantum: true });
+  const scanner = new TlsScannerService({
+    timeoutMs: 8_000,
+    concurrency: 10,
+    probePostQuantum: true,
+    allowPrivateTargets: process.env.SCAN_ALLOW_PRIVATE_TARGETS === 'true',
+  });
   const outcomes = await scanner.scanMany(targets);
 
   if (json) {

@@ -78,6 +78,7 @@ export interface TlsScanResult {
 
 export type ScanErrorCode =
   | 'INVALID_TARGET'
+  | 'TARGET_NOT_ALLOWED'
   | 'DNS_NOT_FOUND'
   | 'CONNECTION_REFUSED'
   | 'CONNECTION_RESET'

@@ -1,4 +1,5 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Roles } from '../auth/decorators';
 import { Paginated } from '../common/pagination';
 import { Asset } from './asset.entity';
 import { AssetsService } from './assets.service';
@@ -10,6 +11,7 @@ export class AssetsController {
 
   // POST /api/assets  { "host": "github.com", "port": 443, "label": "GitHub", "environment": "production" }
   @Post()
+  @Roles('admin')
   create(@Body() dto: CreateAssetDto): Promise<Asset> {
     return this.assets.create(dto);
   }
@@ -26,11 +28,13 @@ export class AssetsController {
   }
 
   @Patch(':id')
+  @Roles('admin')
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateAssetDto): Promise<Asset> {
     return this.assets.update(id, dto);
   }
 
   @Delete(':id')
+  @Roles('admin')
   @HttpCode(204)
   remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.assets.remove(id);
