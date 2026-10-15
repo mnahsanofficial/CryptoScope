@@ -1,5 +1,17 @@
 import { ScanErrorCode } from './scanner.types';
 
+/**
+ * Errors that may go away if we try again later (network blips, a service restarting).
+ * DNS_NOT_FOUND, INVALID_TARGET or a failed TLS handshake will fail the same way every time,
+ * so retrying them only wastes time.
+ */
+export const RETRYABLE_SCAN_ERRORS: ReadonlySet<ScanErrorCode> = new Set<ScanErrorCode>([
+  'TIMEOUT',
+  'CONNECTION_REFUSED',
+  'CONNECTION_RESET',
+  'HOST_UNREACHABLE',
+]);
+
 export class ScanError extends Error {
   constructor(
     readonly code: ScanErrorCode,

@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'node:crypto';
 import { DataSource, EntityManager, Repository } from 'typeorm';
@@ -6,69 +6,63 @@ import { Asset } from '../assets/asset.entity';
 import { offsetOf, Paginated, PaginationQueryDto, toPaginated } from '../common/pagination';
 import { Finding } from '../findings/finding.entity';
 import { RiskEngine } from '../risk/risk-engine';
-import { toScanError } from '../scanner/scan-error';
-import { CertificateInfo } from '../scanner/scanner.types';
-import { TlsScannerService } from '../scanner/tls-scanner.service';
+import { ScanError } from '../scanner/scan-error';
+import { CertificateInfo, TlsScanResult } from '../scanner/scanner.types';
 import { Certificate } from './certificate.entity';
 import { Scan } from './scan.entity';
 import { toCertificateRow, toFailedScanRow, toFindingRows, toSuccessfulScanRow } from './scan.mapper';
 
+export interface RecordScanInput {
+  scanId: string;
+  assetId: string;
+  scannedAt: Date;
+  durationMs: number;
+  /** What the scanner returned, or why it failed. */
+  outcome: TlsScanResult | ScanError;
+}
+
 @Injectable()
 export class ScansService {
-  private readonly logger = new Logger(ScansService.name);
-
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @InjectRepository(Asset) private readonly assets: Repository<Asset>,
     @InjectRepository(Scan) private readonly scans: Repository<Scan>,
-    private readonly scanner: TlsScannerService,
     private readonly riskEngine: RiskEngine,
   ) {}
 
   /**
-   * Scans an asset now and stores the result. A failed scan is still recorded (with its error code),
-   * because "we could not reach it" is useful history too.
-   * Synchronous for now; Step 6 moves this into a BullMQ worker.
+   * Stores the result of one scan: the scan row, its (deduplicated) certificate, its findings and the
+   * asset's latest risk, all in ONE transaction. A failed scan is recorded too, because "we could not
+   * reach it" is useful history.
+   *
+   * Idempotent: if a scan with this id already exists, nothing happens. A retried job can safely call
+   * this again after a crash between "saved" and "indexed".
    */
-  async scanAsset(assetId: string): Promise<Scan> {
-    const asset = await this.assets.findOneBy({ id: assetId });
-    if (!asset) throw new NotFoundException(`Asset ${assetId} not found`);
+  async recordScan(input: RecordScanInput): Promise<'recorded' | 'already-recorded'> {
+    const { scanId, assetId, scannedAt, durationMs, outcome } = input;
 
-    const scanId = randomUUID();
-    const scannedAt = new Date();
+    return this.dataSource.transaction(async (em) => {
+      if (await em.existsBy(Scan, { id: scanId })) return 'already-recorded';
 
-    // The network call happens OUTSIDE the transaction: never hold a DB transaction open while waiting on I/O.
-    let outcome: Awaited<ReturnType<TlsScannerService['scan']>> | null = null;
-    let failure: ReturnType<typeof toScanError> | null = null;
-    try {
-      outcome = await this.scanner.scan({ host: asset.host, port: asset.port });
-    } catch (err) {
-      failure = toScanError(err);
-      this.logger.warn(`Scan of ${asset.host}:${asset.port} failed: [${failure.code}] ${failure.message}`);
-    }
-    const durationMs = Date.now() - scannedAt.getTime();
-
-    // All writes succeed together or not at all.
-    await this.dataSource.transaction(async (em) => {
-      if (outcome) {
-        const risk = this.riskEngine.assess(outcome, scannedAt);
-        const certificateId = await this.upsertCertificate(em, outcome.certificate);
-        await em.insert(Scan, toSuccessfulScanRow({ id: scanId, assetId, scannedAt, durationMs, certificateId }, outcome, risk));
-        const findings = toFindingRows({ scanId, assetId }, risk, scannedAt, randomUUID);
-        if (findings.length) await em.insert(Finding, findings);
-        await em.update(Asset, assetId, {
-          lastScannedAt: scannedAt,
-          latestRiskScore: risk.score,
-          latestRiskLevel: risk.level,
-        });
-      } else if (failure) {
-        await em.insert(Scan, toFailedScanRow({ id: scanId, assetId, scannedAt, durationMs }, failure));
+      if (outcome instanceof ScanError) {
+        await em.insert(Scan, toFailedScanRow({ id: scanId, assetId, scannedAt, durationMs }, outcome));
         // Keep the last known risk: a timeout doesn't make a host safer or riskier.
         await em.update(Asset, assetId, { lastScannedAt: scannedAt });
+        return 'recorded';
       }
-    });
 
-    return this.findOne(scanId);
+      const risk = this.riskEngine.assess(outcome, scannedAt);
+      const certificateId = await this.upsertCertificate(em, outcome.certificate);
+      await em.insert(Scan, toSuccessfulScanRow({ id: scanId, assetId, scannedAt, durationMs, certificateId }, outcome, risk));
+      const findings = toFindingRows({ scanId, assetId }, risk, scannedAt, randomUUID);
+      if (findings.length) await em.insert(Finding, findings);
+      await em.update(Asset, assetId, {
+        lastScannedAt: scannedAt,
+        latestRiskScore: risk.score,
+        latestRiskLevel: risk.level,
+      });
+      return 'recorded';
+    });
   }
 
   /**
@@ -86,6 +80,10 @@ export class ScansService {
       .returning(['id'])
       .execute();
     return (result.raw as Array<{ id: string }>)[0].id;
+  }
+
+  exists(id: string): Promise<boolean> {
+    return this.scans.existsBy({ id });
   }
 
   async findOne(id: string): Promise<Scan> {

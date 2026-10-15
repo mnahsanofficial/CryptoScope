@@ -22,7 +22,8 @@
     "seed": "ts-node --transpile-only src/database/seed/seed.ts",
     "db:explain-demo": "ts-node --transpile-only src/database/perf/explain-demo.ts",
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
-    "logs:generate": "ts-node --transpile-only src/analytics/generator/generate-handshake-logs.ts"
+    "logs:generate": "ts-node --transpile-only src/analytics/generator/generate-handshake-logs.ts",
+    "scans:watch": "ts-node --transpile-only src/cli/watch-scans.ts"
   },
   "jest": {
     "moduleFileExtensions": [
@@ -48,12 +49,16 @@
   },
   "dependencies": {
     "@elastic/elasticsearch": "^8.19.2",
+    "@nestjs/bullmq": "^11.0.5",
     "@nestjs/common": "^11.2.7",
     "@nestjs/config": "^4.0.4",
     "@nestjs/core": "^11.2.7",
     "@nestjs/mapped-types": "^2.1.1",
     "@nestjs/platform-express": "^11.2.7",
+    "@nestjs/platform-socket.io": "^11.2.7",
     "@nestjs/typeorm": "^11.0.3",
+    "@nestjs/websockets": "^11.2.7",
+    "bullmq": "^5.81.5",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "dotenv": "^17.4.2",
@@ -61,6 +66,7 @@
     "pg": "^8.23.1",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
+    "socket.io": "^4.8.4",
     "typeorm": "^0.3.31"
   },
   "devDependencies": {
@@ -73,6 +79,7 @@
     "@types/pg": "^8.23.1",
     "@types/supertest": "^7.2.1",
     "jest": "^30.5.2",
+    "socket.io-client": "^4.8.4",
     "source-map-support": "^0.5.21",
     "supertest": "^7.3.1",
     "ts-jest": "^29.4.15",

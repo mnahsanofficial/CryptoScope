@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AnalyticsModule } from './analytics/analytics.module';
@@ -11,6 +12,7 @@ import { RedisModule } from './infra/redis.module';
 import { HealthModule } from './health/health.module';
 import { RiskModule } from './risk/risk.module';
 import { ScannerModule } from './scanner/scanner.module';
+import { ScanJobsModule } from './scan-jobs/scan-jobs.module';
 import { ScansModule } from './scans/scans.module';
 
 @Module({
@@ -29,6 +31,13 @@ import { ScansModule } from './scans/scans.module';
         migrationsRun: true,
       }),
     }),
+    BullModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => ({
+        connection: config.getOrThrow<AppConfig['redis']>('redis'),
+        prefix: config.getOrThrow<AppConfig['queue']>('queue').prefix,
+      }),
+    }),
     RedisModule,
     ElasticsearchModule,
     HealthModule,
@@ -38,6 +47,7 @@ import { ScansModule } from './scans/scans.module';
     ScansModule,
     FindingsModule,
     AnalyticsModule,
+    ScanJobsModule,
   ],
 })
 export class AppModule {}

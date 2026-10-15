@@ -16,10 +16,22 @@ export interface AppConfig {
     node: string;
     /** Alias the handshake-log analytics read from (points at a versioned index). */
     handshakeIndex: string;
+    /** Index the scan worker writes findings to (a search/read copy of the Postgres findings). */
+    findingsIndex: string;
   };
   scanner: {
     timeoutMs: number;
     concurrency: number;
+  };
+  queue: {
+    /** Redis key prefix for BullMQ. Different prefixes = fully separate queues (used by the e2e tests). */
+    prefix: string;
+    /** Scan jobs processed at the same time by this process. */
+    workerConcurrency: number;
+    /** Total tries per scan job (1 = no retries). */
+    scanAttempts: number;
+    /** First retry delay; doubles each time (exponential backoff). */
+    retryDelayMs: number;
   };
 }
 
@@ -70,10 +82,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     elasticsearch: {
       node: required(env, 'ELASTICSEARCH_NODE'),
       handshakeIndex: env.HANDSHAKE_INDEX ?? 'tls-handshakes',
+      findingsIndex: env.FINDINGS_INDEX ?? 'cryptoscope-findings',
     },
     scanner: {
       timeoutMs: toPositiveInt(env.SCAN_TIMEOUT_MS ?? '5000', 'SCAN_TIMEOUT_MS'),
       concurrency: toPositiveInt(env.SCAN_CONCURRENCY ?? '10', 'SCAN_CONCURRENCY'),
+    },
+    queue: {
+      prefix: env.QUEUE_PREFIX ?? 'cryptoscope',
+      workerConcurrency: toPositiveInt(env.SCAN_WORKER_CONCURRENCY ?? '5', 'SCAN_WORKER_CONCURRENCY'),
+      scanAttempts: toPositiveInt(env.SCAN_JOB_ATTEMPTS ?? '3', 'SCAN_JOB_ATTEMPTS'),
+      retryDelayMs: toPositiveInt(env.SCAN_RETRY_DELAY_MS ?? '2000', 'SCAN_RETRY_DELAY_MS'),
     },
   };
 }
