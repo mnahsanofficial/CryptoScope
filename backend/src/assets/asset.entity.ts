@@ -3,6 +3,8 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   OneToMany,
   PrimaryGeneratedColumn,
   Unique,
@@ -18,6 +20,7 @@ export type Environment = (typeof ENVIRONMENTS)[number];
 @Entity('assets')
 @Unique('uq_assets_host_port', ['host', 'port'])
 @Index('idx_assets_latest_risk_score', ['latestRiskScore'])
+@Index('idx_assets_latest_scan_id', ['latestScanId'])
 export class Asset {
   @PrimaryGeneratedColumn('uuid', { primaryKeyConstraintName: 'pk_assets' })
   id: string;
@@ -43,6 +46,14 @@ export class Asset {
 
   @Column({ type: 'timestamptz', nullable: true })
   lastScannedAt: Date | null;
+
+  /** Newest successful scan: its findings are the asset's "current" findings. */
+  @Column({ type: 'uuid', nullable: true })
+  latestScanId: string | null;
+
+  @ManyToOne(() => Scan, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'latest_scan_id', foreignKeyConstraintName: 'fk_assets_latest_scan_id' })
+  latestScan: Scan | null;
 
   @CreateDateColumn({ type: 'timestamptz' })
   createdAt: Date;

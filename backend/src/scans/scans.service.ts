@@ -60,6 +60,7 @@ export class ScansService {
         lastScannedAt: scannedAt,
         latestRiskScore: risk.score,
         latestRiskLevel: risk.level,
+        latestScanId: scanId,
       });
       return 'recorded';
     });
