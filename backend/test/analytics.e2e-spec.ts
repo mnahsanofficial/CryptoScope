@@ -3,8 +3,8 @@
  * Indexes 8 hand-crafted handshakes into a temporary index, so every aggregation result can be checked
  * against numbers worked out by hand. Needs Elasticsearch running:  npm run test:e2e
  */
-import { INestApplication } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { Test } from '@nestjs/testing';
 import { Client } from '@elastic/elasticsearch';
 import { join } from 'node:path';
@@ -49,7 +49,7 @@ const HANDSHAKES: HandshakeLog[] = [
 ];
 
 describe('Handshake analytics (e2e)', () => {
-  let app: INestApplication;
+  let app: NestExpressApplication;
   let es: Client;
 
   beforeAll(async () => {
@@ -64,7 +64,7 @@ describe('Handshake analytics (e2e)', () => {
       .useValue(TEST_INDEX)
       .compile();
 
-    app = moduleRef.createNestApplication({ logger: false });
+    app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
     configureApp(app);
     await app.init();
 
@@ -172,7 +172,7 @@ describe('Handshake analytics without an index (e2e)', () => {
       .overrideProvider(HANDSHAKE_INDEX)
       .useValue('index-that-does-not-exist')
       .compile();
-    const app = moduleRef.createNestApplication({ logger: false });
+    const app = moduleRef.createNestApplication<NestExpressApplication>({ logger: false });
     configureApp(app);
     await app.init();
 

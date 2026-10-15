@@ -6,12 +6,11 @@ import { INestApplication } from '@nestjs/common';
 import { Client } from '@elastic/elasticsearch';
 import * as tls from 'node:tls';
 import { io, Socket } from 'socket.io-client';
-import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { FindingsIndexer } from '../src/findings/findings-indexer.service';
 import { BatchProgress, ScanProgress } from '../src/scan-jobs/scan-job.types';
 import { ScanProcessor } from '../src/scan-jobs/scan.processor';
-import { bootTestApp, cleanUpTestQueue, closedPort, startTlsServer, TEST_FINDINGS_INDEX, waitForJob } from './helpers';
+import { bootTestApp, cleanUpTestQueue, client, closedPort, startTlsServer, TEST_FINDINGS_INDEX, TestTokens, waitForJob } from './helpers';
 
 describe('Async scan pipeline (e2e)', () => {
   let app: INestApplication;
@@ -22,12 +21,13 @@ describe('Async scan pipeline (e2e)', () => {
   let socket: Socket;
   let events: ScanProgress[];
   let batchEvents: BatchProgress[];
+  let tokens: TestTokens;
 
   beforeAll(async () => {
     ({ server: tlsServer, port: tlsPort } = await startTlsServer());
-    ({ app, db, url } = await bootTestApp());
+    ({ app, db, url, tokens } = await bootTestApp());
 
-    socket = io(`${url}/scans`, { transports: ['websocket'] });
+    socket = io(`${url}/scans`, { transports: ['websocket'], auth: { token: tokens.viewer } }); // viewers may watch
     await new Promise<void>((resolve, reject) => {
       socket.once('connect', resolve);
       socket.once('connect_error', reject);
@@ -50,7 +50,7 @@ describe('Async scan pipeline (e2e)', () => {
     await db.query('TRUNCATE findings, scans, certificates, assets');
   });
 
-  const api = () => request(app.getHttpServer());
+  const api = () => client(app, tokens.admin);
   const createAsset = async (body: object) => (await api().post('/api/assets').send(body).expect(201)).body;
   const worker = () => app.get(ScanProcessor).worker;
 
@@ -69,7 +69,7 @@ describe('Async scan pipeline (e2e)', () => {
     const { body } = await api().post(`/api/assets/${asset.id}/scans`).expect(202);
     expect(body).toMatchObject({ assetId: asset.id, created: true, jobId: body.scanId });
 
-    await waitForJob(app, body.jobId);
+    await waitForJob(app, tokens.admin, body.jobId);
     await eventually(() => events.some((e) => e.jobId === body.jobId && e.stage === 'completed'));
 
     const stages = events.filter((e) => e.jobId === body.jobId).map((e) => e.stage);
@@ -84,7 +84,7 @@ describe('Async scan pipeline (e2e)', () => {
     const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
     const { body } = await api().post(`/api/assets/${asset.id}/scans`).expect(202);
 
-    const job = await waitForJob(app, body.jobId);
+    const job = await waitForJob(app, tokens.admin, body.jobId);
 
     expect(job).toMatchObject({ state: 'completed', attemptsMade: 1, result: { scanId: body.scanId, status: 'success' } });
   });
@@ -93,7 +93,7 @@ describe('Async scan pipeline (e2e)', () => {
     const asset = await createAsset({ host: '127.0.0.1', port: await closedPort() });
     const { body } = await api().post(`/api/assets/${asset.id}/scans`).expect(202);
 
-    const job = await waitForJob(app, body.jobId);
+    const job = await waitForJob(app, tokens.admin, body.jobId);
     await eventually(() => events.some((e) => e.jobId === body.jobId && e.stage === 'completed'));
 
     expect(job).toMatchObject({ state: 'completed', attemptsMade: 3 });
@@ -142,7 +142,7 @@ describe('Async scan pipeline (e2e)', () => {
     await api().delete(`/api/assets/${asset.id}`).expect(204);
     worker().resume();
 
-    const job = await waitForJob(app, body.jobId);
+    const job = await waitForJob(app, tokens.admin, body.jobId);
 
     expect(job).toMatchObject({ state: 'failed', attemptsMade: 1 }); // UnrecoverableError: no retries
     expect(job.failedReason).toContain('no longer exists');
@@ -152,7 +152,7 @@ describe('Async scan pipeline (e2e)', () => {
   it('indexes findings into Elasticsearch with stable ids, so re-indexing never duplicates', async () => {
     const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
     const { body } = await api().post(`/api/assets/${asset.id}/scans`).expect(202);
-    await waitForJob(app, body.jobId);
+    await waitForJob(app, tokens.admin, body.jobId);
 
     const es = app.get(Client);
     const countDocs = async () => {
