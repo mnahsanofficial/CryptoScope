@@ -103,6 +103,27 @@ npm run scan -- github.com example.com:8443
 npm run scan -- --json google.com          # full JSON output
 ```
 
+## Risk scoring
+
+Every successful scan is run through a rules engine ([backend/src/risk/rules.ts](backend/src/risk/rules.ts)).
+Each rule is a pure function that returns a finding (with evidence and a recommendation) or nothing.
+
+| Rule                     | Severity                    | Why it matters                                           |
+| ------------------------ | --------------------------- | -------------------------------------------------------- |
+| `CERT_EXPIRED`           | critical                    | Clients reject the certificate                           |
+| `CERT_EXPIRING_SOON`     | high (< 30 days)            | Most common cause of outages                             |
+| `WEAK_RSA_KEY`           | high (< 2048 bits)          | Below NIST minimums                                      |
+| `WEAK_SIGNATURE_HASH`    | high (SHA-1), critical (MD5) | Practical collisions allow forged certificates          |
+| `LEGACY_TLS_VERSION`     | high (TLS 1.0/1.1), critical (SSLv3) | Deprecated by RFC 8996                          |
+| `CERT_SELF_SIGNED`       | medium                      | No trusted third party vouches for the server            |
+| `CERT_UNTRUSTED_CHAIN`   | medium                      | Any other chain validation failure                       |
+| `QUANTUM_VULNERABLE_KEY` | medium (any RSA / ECC key)  | Shor's algorithm breaks RSA and elliptic-curve keys      |
+| `NO_PQ_KEY_EXCHANGE`     | medium                      | "Harvest now, decrypt later" on recorded traffic         |
+
+**Score (0–100)** = sum of finding weights (critical 50, high 25, medium 10, low 3), capped at 100.
+**Level** = the worst finding's severity, so a single critical issue is never hidden by a low score.
+Only a fully post-quantum server (ML-DSA certificate + hybrid ML-KEM key exchange, TLS 1.3) scores 0.
+
 ## API
 
 | Method | Path                | Description                                                      |
@@ -110,13 +131,14 @@ npm run scan -- --json google.com          # full JSON output
 | GET    | `/api/health`       | Liveness: the process is up. Used by Docker's healthcheck.       |
 | GET    | `/api/health/ready` | Readiness: Postgres, Redis and Elasticsearch reachable (or 503). |
 | GET    | `/api/scanner/seed-targets` | The demo target list.                                    |
-| POST   | `/api/scanner/scan` | Scan up to 50 targets: `{ "targets": ["github.com", "host:8443"] }`. |
+| POST   | `/api/scanner/scan` | Scan up to 50 targets: `{ "targets": ["github.com", "host:8443"] }`. Each result includes its risk assessment. |
+| GET    | `/api/risk/rules`   | All risk rules with severity, category and rationale, plus the score weights. |
 
 ## Roadmap
 
 - [x] Step 1 – Project setup, docker-compose, health checks
 - [x] Step 2 – TLS scanner service
-- [ ] Step 3 – Risk scoring engine
+- [x] Step 3 – Risk scoring engine
 - [ ] Step 4 – PostgreSQL data model + query optimization
 - [ ] Step 5 – Elasticsearch log analytics
 - [ ] Step 6 – Async pipeline (BullMQ) + real-time (Socket.IO)
