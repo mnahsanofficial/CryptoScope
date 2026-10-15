@@ -54,7 +54,7 @@ export function ScanProgressPanel() {
           <li key={job.jobId} className="text-xs">
             <div className="mb-1 flex justify-between gap-2">
               <span className="truncate text-ink-2" title={job.message}>
-                {job.message ?? job.jobId.slice(0, 8)}
+                {job.message ?? (job.stage === "queued" ? "Waiting in queue" : `Scan ${job.jobId.slice(0, 8)}`)}
               </span>
               <span className={`shrink-0 font-medium ${job.stage === "failed" ? "text-danger" : "text-ink"}`}>
                 {STAGE_LABEL[job.stage]}

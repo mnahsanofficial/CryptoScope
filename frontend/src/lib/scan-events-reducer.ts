@@ -33,9 +33,11 @@ export function scanEventsReducer(state: ScanEventsState, event: ScanEvent): Sca
 
       const others = state.jobs.filter((j) => j.jobId !== update.jobId);
       const justFinished = isFinished(update) && !(previous && isFinished(previous));
+      // Later stages often have no message; keep the last readable one ("Connecting to github.com:443").
+      const merged: ScanProgress = { ...update, message: update.message ?? previous?.message };
       return {
         ...state,
-        jobs: [update, ...others].slice(0, MAX_TRACKED_JOBS),
+        jobs: [merged, ...others].slice(0, MAX_TRACKED_JOBS),
         finishedCount: state.finishedCount + (justFinished ? 1 : 0),
       };
     }

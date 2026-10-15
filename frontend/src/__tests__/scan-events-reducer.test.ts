@@ -25,6 +25,11 @@ describe("scanEventsReducer", () => {
     ]);
   });
 
+  it("keeps the last readable message when a later stage has none", () => {
+    const state = apply(scan({ ...progress("j1", "scanning", 25), message: "Connecting to github.com:443" }), scan(progress("j1", "saving", 60)));
+    expect(state.jobs[0]).toMatchObject({ stage: "saving", message: "Connecting to github.com:443" });
+  });
+
   it("counts each finished job once, so pages reload exactly once per scan", () => {
     const state = apply(scan(progress("j1", "completed", 100)), scan(progress("j1", "completed", 100)), scan(progress("j2", "failed", 100)));
     expect(state.finishedCount).toBe(2);
@@ -60,5 +65,22 @@ describe("scanEventsReducer", () => {
   it("overallProgress averages the tracked jobs", () => {
     const state = apply(scan(progress("j1", "completed", 100)), scan(progress("j2", "scanning", 20)));
     expect(overallProgress(state)).toEqual({ active: 1, finished: 1, percent: 60 });
+  });
+});
+
+describe("chart helpers", () => {
+  // Imported here to keep the chart tests next to the other pure-logic tests.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { niceTicks, completeBuckets } = require("@/components/charts") as typeof import("@/components/charts");
+
+  it("niceTicks gives clean round steps", () => {
+    expect(niceTicks(2187)).toEqual([0, 500, 1000, 1500, 2000, 2500]);
+    expect(niceTicks(9)).toEqual([0, 2, 4, 6, 8, 10]);
+    expect(niceTicks(0)).toEqual([0]);
+  });
+
+  it("completeBuckets drops the bucket that is still in progress", () => {
+    const buckets = ["10:00", "11:00", "12:00"].map((t) => ({ timestamp: `2026-06-01T${t}:00.000Z` }));
+    expect(completeBuckets(buckets, Date.parse("2026-06-01T12:30:00Z")).map((b) => b.timestamp.slice(11, 16))).toEqual(["10:00", "11:00"]);
   });
 });
