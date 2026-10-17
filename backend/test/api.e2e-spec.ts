@@ -32,7 +32,8 @@ describe('CryptoScope API (e2e)', () => {
   });
 
   const api = () => client(app, tokens.admin);
-  const createAsset = async (body: object) => (await api().post('/api/assets').send(body).expect(201)).body;
+  // scanNow: false so these tests control exactly when scans run (auto-scan has its own tests).
+  const createAsset = async (body: object) => (await api().post('/api/assets').send({ scanNow: false, ...body }).expect(201)).body;
 
   describe('assets CRUD', () => {
     it('creates, reads, updates and deletes an asset', async () => {

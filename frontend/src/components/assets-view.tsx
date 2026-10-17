@@ -184,6 +184,7 @@ function AddAssetForm({ onAdded, onError }: { onAdded: () => void; onError: (mes
   const [host, setHost] = useState("");
   const [port, setPort] = useState("443");
   const [environment, setEnvironment] = useState("production");
+  const [scanNow, setScanNow] = useState(true);
   const [saving, setSaving] = useState(false);
 
   async function submit(event: FormEvent) {
@@ -191,7 +192,8 @@ function AddAssetForm({ onAdded, onError }: { onAdded: () => void; onError: (mes
     setSaving(true);
     onError(null);
     try {
-      await apiFetch("/assets", { method: "POST", body: { host, port: Number(port), environment } });
+      // With scanNow the API queues the first scan; its progress shows up in the live scan panel.
+      await apiFetch("/assets", { method: "POST", body: { host, port: Number(port), environment, scanNow } });
       setHost("");
       onAdded();
     } catch (err) {
@@ -218,6 +220,10 @@ function AddAssetForm({ onAdded, onError }: { onAdded: () => void; onError: (mes
           <option value="staging">Staging</option>
           <option value="development">Development</option>
         </select>
+      </label>
+      <label className="flex items-center gap-2 self-center text-sm text-ink-2">
+        <input type="checkbox" checked={scanNow} onChange={(e) => setScanNow(e.target.checked)} />
+        Scan right away
       </label>
       <Button type="submit" variant="secondary" disabled={saving || !host}>
         {saving ? "Adding…" : "Add asset"}

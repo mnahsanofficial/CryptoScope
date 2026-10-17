@@ -190,7 +190,7 @@ curl -s -X POST localhost:3001/api/auth/login -H 'content-type: application/json
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET / POST | `/api/assets` | List (`search`, `riskLevel`, `environment`, `sort`, `order`, `page`, `pageSize`) / 🔒 create `{ host, port, label, environment }` |
+| GET / POST | `/api/assets` | List (`search` also accepts URLs or `host:port`, `riskLevel`, `environment`, `sort`, `order`, `page`, `pageSize`) / 🔒 create `{ host, port, label, environment, scanNow }`: queues the first scan unless `scanNow: false` |
 | GET / PATCH / DELETE | `/api/assets/:id` | Read / 🔒 update / 🔒 delete (cascades to scans and findings) |
 | POST | `/api/assets/:id/scans` | 🔒 Queue a scan → `202 { jobId, scanId, created }` |
 | POST | `/api/scan-jobs` | 🔒 Queue a batch `{ assetIds }` → `202 { batchId, total, jobs }` |

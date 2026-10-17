@@ -1,5 +1,5 @@
-import { PartialType } from '@nestjs/mapped-types';
-import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { OmitType, PartialType } from '@nestjs/mapped-types';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { CommaSeparated, PaginationQueryDto } from '../../common/pagination';
 import { RISK_LEVELS, RiskLevel } from '../../risk/risk.types';
 import { Environment, ENVIRONMENTS } from '../asset.entity';
@@ -24,10 +24,15 @@ export class CreateAssetDto {
   @IsOptional()
   @IsIn(ENVIRONMENTS)
   environment?: Environment;
+
+  /** Queue a scan right after creating the asset (default true). Set false for bulk imports. */
+  @IsOptional()
+  @IsBoolean()
+  scanNow?: boolean;
 }
 
-/** Every field optional for PATCH. */
-export class UpdateAssetDto extends PartialType(CreateAssetDto) {}
+/** Every field optional for PATCH. `scanNow` only makes sense when creating. */
+export class UpdateAssetDto extends PartialType(OmitType(CreateAssetDto, ['scanNow'] as const)) {}
 
 export const ASSET_SORT_FIELDS = ['riskScore', 'host', 'lastScannedAt', 'createdAt'] as const;
 

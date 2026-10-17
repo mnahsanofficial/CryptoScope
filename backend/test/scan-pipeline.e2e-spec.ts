@@ -51,7 +51,8 @@ describe('Async scan pipeline (e2e)', () => {
   });
 
   const api = () => client(app, tokens.admin);
-  const createAsset = async (body: object) => (await api().post('/api/assets').send(body).expect(201)).body;
+  // scanNow: false so these tests control exactly when scans run (auto-scan has its own tests).
+  const createAsset = async (body: object) => (await api().post('/api/assets').send({ scanNow: false, ...body }).expect(201)).body;
   const worker = () => app.get(ScanProcessor).worker;
 
   /** Events arrive asynchronously (Redis stream -> listener -> socket), so wait for the one we need. */
@@ -78,6 +79,26 @@ describe('Async scan pipeline (e2e)', () => {
       percent: 100,
       result: { scanId: body.scanId, status: 'success', riskScore: 30, findingsIndexed: 3 },
     });
+  });
+
+  it('adding an asset queues its first scan automatically', async () => {
+    const { body: asset } = await api().post('/api/assets').send({ host: '127.0.0.1', port: tlsPort }).expect(201);
+
+    expect(asset.scanJob).toMatchObject({ assetId: asset.id, created: true });
+    const job = await waitForJob(app, tokens.admin, asset.scanJob.jobId);
+    expect(job.state).toBe('completed');
+
+    const { body: scanned } = await api().get(`/api/assets/${asset.id}`).expect(200);
+    expect(scanned).toMatchObject({ latestRiskScore: 30, latestRiskLevel: 'medium' });
+    await eventually(() => events.some((e) => e.jobId === asset.scanJob.jobId && e.stage === 'completed'));
+  });
+
+  it('scanNow: false only records the asset', async () => {
+    const { body: asset } = await api().post('/api/assets').send({ host: '127.0.0.1', port: tlsPort, scanNow: false }).expect(201);
+
+    expect(asset.scanJob).toBeNull();
+    const { body: counts } = await api().get('/api/scan-jobs').expect(200);
+    expect(counts.waiting + counts.active).toBe(0);
   });
 
   it('reports job details through GET /api/scan-jobs/:id', async () => {
