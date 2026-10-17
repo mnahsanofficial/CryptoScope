@@ -1,11 +1,14 @@
 "use client";
 
+import { Search, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { queryString } from "@/lib/api";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatNumber } from "@/lib/format";
 import { useScanEvents } from "@/lib/scan-events-context";
-import type { Finding, FindingCategory, Paginated, Severity } from "@/lib/types";
+import type { Finding, FindingCategory, FindingSearchResponse, Paginated, Severity } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
+import { useDebounced } from "@/lib/use-debounced";
+import { Highlighted } from "./ui/highlighted";
 import { Card, ErrorNote, Pagination, RiskBadge, Skeleton, tableClasses as t } from "./ui/primitives";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
@@ -17,14 +20,37 @@ interface RuleMeta {
   title: string;
 }
 
+/** What one table row needs, whichever backend (PostgreSQL list or Elasticsearch search) produced it. */
+interface Row {
+  id: string;
+  severity: Severity;
+  title: string;
+  description: string;
+  recommendation: string;
+  host: string;
+  port: number;
+  createdAt: string;
+  highlight?: { title?: string; description?: string; host?: string };
+}
+
+const fromList = (f: Finding): Row => ({ ...f, host: f.asset.host, port: f.asset.port });
+
+/**
+ * Two modes, one page:
+ *  - no search text: the PostgreSQL list (exact filters, sort by date or severity);
+ *  - search text: Elasticsearch full-text search (relevance, typo tolerance, highlights, severity counts).
+ */
 export function FindingsView() {
   const { finishedCount } = useScanEvents();
+  const [search, setSearch] = useState("");
   const [severities, setSeverities] = useState<Severity[]>(["critical", "high"]);
   const [category, setCategory] = useState("");
   const [ruleId, setRuleId] = useState("");
   const [latestOnly, setLatestOnly] = useState(true);
   const [sort, setSort] = useState("createdAt");
   const [page, setPage] = useState(1);
+  const q = useDebounced(search.trim());
+  const searching = q.length > 0;
 
   /** Changing a filter always starts again at page 1. */
   const filter = <T,>(set: (value: T) => void) => (value: T) => {
@@ -33,12 +59,20 @@ export function FindingsView() {
   };
 
   const rules = useApi<{ rules: RuleMeta[] }>("/risk/rules");
-  const path = `/findings${queryString({ severity: severities, category, ruleId, latestOnly, sort, order: "desc", page, pageSize: 20 })}`;
-  const findings = useApi<Paginated<Finding>>(path);
-  const { reload } = findings;
+  const listPath = `/findings${queryString({ severity: severities, category, ruleId, latestOnly, sort, order: "desc", page, pageSize: 20 })}`;
+  const searchPath = `/findings/search${queryString({ q, severity: severities, category, ruleId, currentOnly: latestOnly, page, pageSize: 20 })}`;
+  const list = useApi<Paginated<Finding>>(searching ? null : listPath);
+  const results = useApi<FindingSearchResponse>(searching ? searchPath : null);
+  const active = searching ? results : list;
+
+  const { reload } = active;
   useEffect(() => {
     if (finishedCount > 0) reload();
   }, [finishedCount, reload]);
+
+  const rows: Row[] = searching ? (results.data?.data ?? []) : (list.data?.data ?? []).map(fromList);
+  const meta = searching ? results.data?.meta : list.data?.meta;
+  const facets = searching ? results.data?.facets.severity : undefined;
 
   const toggleSeverity = (s: Severity) =>
     filter(setSeverities)(severities.includes(s) ? severities.filter((x) => x !== s) : [...severities, s]);
@@ -51,11 +85,35 @@ export function FindingsView() {
       </div>
 
       <Card>
+        {/* Search: free text over host, title, description and recommendation (Elasticsearch) */}
+        <div className="relative mb-3">
+          <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
+          <input
+            type="search"
+            aria-label="Search findings"
+            placeholder="Search by host or text, e.g. zeuz, expired certificate, tls 1.0…"
+            value={search}
+            onChange={(e) => filter(setSearch)(e.target.value)}
+            className={`${inputClass} w-full pl-9 pr-9`}
+          />
+          {search && (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => filter(setSearch)("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-ink-muted hover:bg-surface-2 hover:text-ink"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
         {/* Filters: one row above the table */}
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <div role="group" aria-label="Severity" className="flex gap-1">
+          <div role="group" aria-label="Severity" className="flex flex-wrap gap-1">
             {SEVERITIES.map((s) => {
               const on = severities.includes(s);
+              const count = facets?.[s];
               return (
                 <button
                   key={s}
@@ -65,6 +123,7 @@ export function FindingsView() {
                   className={`rounded-full border px-3 py-1.5 text-sm ${on ? "border-accent bg-accent-soft font-medium text-ink" : "border-hairline text-ink-2 hover:bg-surface-2"}`}
                 >
                   {s[0].toUpperCase() + s.slice(1)}
+                  {facets && <span className="tabular ml-1.5 text-ink-muted">{formatNumber(count ?? 0)}</span>}
                 </button>
               );
             })}
@@ -81,18 +140,26 @@ export function FindingsView() {
               <option key={r.id} value={r.id}>{r.title}</option>
             ))}
           </select>
-          <select aria-label="Sort by" value={sort} onChange={(e) => filter(setSort)(e.target.value)} className={inputClass}>
-            <option value="createdAt">Newest first</option>
-            <option value="severity">Most severe first</option>
-          </select>
+          {!searching && (
+            <select aria-label="Sort by" value={sort} onChange={(e) => filter(setSort)(e.target.value)} className={inputClass}>
+              <option value="createdAt">Newest first</option>
+              <option value="severity">Most severe first</option>
+            </select>
+          )}
           <label className="ml-auto flex items-center gap-2 text-sm text-ink-2">
             <input type="checkbox" checked={latestOnly} onChange={(e) => filter(setLatestOnly)(e.target.checked)} />
             Current only (latest scan)
           </label>
         </div>
 
-        {findings.error && <ErrorNote message={findings.error} />}
-        {!findings.data && !findings.error ? (
+        {searching && results.data && (
+          <p className="mb-2 text-xs text-ink-muted" aria-live="polite">
+            {formatNumber(results.data.meta.total)} results for “{q}”, best matches first · Elasticsearch, {results.data.took} ms
+          </p>
+        )}
+
+        {active.error && <ErrorNote message={active.error} />}
+        {!active.data && !active.error ? (
           <Skeleton className="h-96" />
         ) : (
           <div className="overflow-x-auto">
@@ -105,37 +172,37 @@ export function FindingsView() {
                   <th className={t.th}>Found</th>
                 </tr>
               </thead>
-              <tbody className={findings.loading ? "opacity-60" : ""}>
-                {findings.data?.data.map((f) => (
+              <tbody className={active.loading ? "opacity-60" : ""}>
+                {rows.map((f) => (
                   <tr key={f.id}>
                     <td className={`${t.td} whitespace-nowrap`}><RiskBadge level={f.severity} /></td>
                     <td className={t.td}>
-                      <p className="font-medium">{f.title}</p>
-                      <p className="mt-0.5 text-ink-2">{f.description}</p>
+                      <p className="font-medium"><Highlighted text={f.title} highlighted={f.highlight?.title} /></p>
+                      <p className="mt-0.5 text-ink-2"><Highlighted text={f.description} highlighted={f.highlight?.description} /></p>
                       <details className="mt-1 text-ink-2">
                         <summary className="cursor-pointer text-xs text-accent">Recommendation</summary>
                         <p className="mt-1">{f.recommendation}</p>
                       </details>
                     </td>
                     <td className={`${t.td} whitespace-nowrap`}>
-                      {f.asset.host}
-                      {f.asset.port !== 443 && <span className="text-ink-muted">:{f.asset.port}</span>}
+                      <Highlighted text={f.host} highlighted={f.highlight?.host} />
+                      {f.port !== 443 && <span className="text-ink-muted">:{f.port}</span>}
                     </td>
                     <td className={`${t.td} whitespace-nowrap text-ink-2`}>{formatDate(f.createdAt)}</td>
                   </tr>
                 ))}
-                {findings.data?.data.length === 0 && (
+                {active.data && rows.length === 0 && (
                   <tr>
-                    <td className={`${t.td} text-ink-2`} colSpan={4}>No findings match these filters.</td>
+                    <td className={`${t.td} text-ink-2`} colSpan={4}>
+                      {searching ? `No findings match “${q}” with these filters.` : "No findings match these filters."}
+                    </td>
                   </tr>
                 )}
               </tbody>
             </table>
           </div>
         )}
-        {findings.data && (
-          <Pagination page={findings.data.meta.page} totalPages={findings.data.meta.totalPages} total={findings.data.meta.total} onPage={setPage} />
-        )}
+        {meta && <Pagination page={meta.page} totalPages={meta.totalPages} total={meta.total} onPage={setPage} />}
       </Card>
     </div>
   );
