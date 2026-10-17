@@ -19,9 +19,18 @@ export function timeAgo(iso: string | null | undefined, now: number = Date.now()
   return `${Math.floor(seconds / 86_400)} d ago`;
 }
 
-/** "Expired 12 days ago", "Expires today", "in 9 days". */
+const plural = (n: number, unit: string) => `${n} ${unit}${n === 1 ? "" : "s"}`;
+
+/** 12 -> "12 days", 75 -> "2 months", 4206 -> "11 years": nobody can read "4206 days" at a glance. */
+export function humanDays(days: number): string {
+  if (days >= 365) return plural(Math.floor(days / 365), "year");
+  if (days >= 60) return plural(Math.floor(days / 30.44), "month"); // average month length: 362 days is 11 months, not 12
+  return plural(days, "day");
+}
+
+/** "Expired 12 days ago", "Expired 11 years ago", "Expires today", "in 9 days". */
 export function expiryLabel(daysLeft: number): string {
-  if (daysLeft < 0) return `Expired ${-daysLeft} ${-daysLeft === 1 ? "day" : "days"} ago`;
+  if (daysLeft < 0) return `Expired ${humanDays(-daysLeft)} ago`;
   if (daysLeft === 0) return "Expires today";
-  return `in ${daysLeft} ${daysLeft === 1 ? "day" : "days"}`;
+  return `in ${humanDays(daysLeft)}`;
 }
