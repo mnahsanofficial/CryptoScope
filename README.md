@@ -124,6 +124,7 @@ Optional: fill it with realistic data (the dashboard is more interesting with it
 ```bash
 cd backend && npm ci
 npm run seed            # 20,000 assets, 100,000 scans, ~200,000 findings (~20 s)
+npm run findings:reindex  # copy the seeded findings into the Elasticsearch search index (~7 s)
 npm run logs:generate   # 500,000 TLS handshake logs into Elasticsearch (~5 s)
 ```
 
@@ -197,6 +198,7 @@ curl -s -X POST localhost:3001/api/auth/login -H 'content-type: application/json
 | GET | `/api/scan-jobs`, `/api/scan-jobs/:jobId`, `/api/scan-jobs/batches/:batchId` | Queue counts, one job, batch progress |
 | GET | `/api/assets/:id/scans`, `/api/scans/:id` | Scan history; one scan with certificate and findings |
 | GET | `/api/findings` | Filters `severity`, `category`, `ruleId`, `assetId`, `from`, `to`, `latestOnly`; sort `createdAt` or `severity`; paginated |
+| GET | `/api/findings/search` | Elasticsearch full-text search: `q` (typo-tolerant, prefix, host + text) plus `severity`, `category`, `ruleId`, `currentOnly`; ranked, highlighted, with severity/category counts |
 | GET | `/api/certificates/expiring` | Certificates in use expiring within `days` (default 30), most urgent first |
 | GET | `/api/dashboard/overview` | Totals, average risk, current findings, % quantum-vulnerable, expiring certificates |
 | POST | `/api/scanner/scan` | 🔒 Ad-hoc scan of up to 50 targets, with risk assessments (not stored) |
@@ -290,9 +292,9 @@ One slow query and its fix (an index, **214x faster**, `EXPLAIN ANALYZE` before/
 
 | Suite | Command | Count | Covers |
 | --- | --- | --- | --- |
-| Backend unit | `cd backend && npm test` | 223 | Scanner (real local TLS servers), DER parser, every risk rule, mappers, query builders, worker retry policy, scrypt, JWT config, SSRF policy, crypto providers (shared contract tests) |
-| Backend e2e | `cd backend && npm run test:e2e` | 57 | Real app + Postgres + Redis/BullMQ + Elasticsearch + Socket.IO: CRUD, async scans, retries, analytics with exact counts, auth/roles, an audit of every route, rate limits, sign/verify |
-| Frontend | `cd frontend && npm test` | 23 | Live-event reducer, API client, session/JWT expiry, chart helpers, login form |
+| Backend unit | `cd backend && npm test` | 240 | Scanner (real local TLS servers), DER parser, every risk rule, mappers, query builders, worker retry policy, scrypt, JWT config, SSRF policy, crypto providers (shared contract tests) |
+| Backend e2e | `cd backend && npm run test:e2e` | 63 | Real app + Postgres + Redis/BullMQ + Elasticsearch + Socket.IO: CRUD, async scans, retries, analytics with exact counts, auth/roles, an audit of every route, rate limits, sign/verify |
+| Frontend | `cd frontend && npm test` | 27 | Live-event reducer, API client, session/JWT expiry, chart helpers, login form, search highlighting |
 
 **CI** (GitHub Actions, [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs, on every push and PR:
 
@@ -327,7 +329,7 @@ CryptoScope/
 | Topic | Document |
 | --- | --- |
 | Query optimisation (EXPLAIN ANALYZE, composite index) | [docs/query-optimization.md](docs/query-optimization.md) |
-| Elasticsearch mapping, aggregations, query vs filter context | [docs/elasticsearch.md](docs/elasticsearch.md) |
+| Elasticsearch mapping, aggregations, query vs filter context, findings search | [docs/elasticsearch.md](docs/elasticsearch.md) |
 | Async pipeline: retries, idempotency, real-time | [docs/async-pipeline.md](docs/async-pipeline.md) |
 | Security: auth, roles, scrypt, SSRF, secrets, production gaps | [docs/security.md](docs/security.md) |
 | Dashboard: data flow, token storage, charts, CSP | [docs/dashboard.md](docs/dashboard.md) |

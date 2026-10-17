@@ -193,3 +193,41 @@ aggregation endpoint uses filter context only.
     or be deleted by dropping a whole index, which is far cheaper than `delete_by_query`.
 11. **Measure.** The `profile: true` search option and Kibana's Search Profiler show where time goes per shard
     and per clause.
+
+## 7. Findings full-text search (`GET /api/findings/search`)
+
+The Findings page has two modes. Without search text it lists findings from PostgreSQL (exact filters,
+sort by date or severity). With search text it asks Elasticsearch, which is built for ranked text search.
+
+**Index.** `cryptoscope-findings` is an **alias** pointing at a versioned index
+(`cryptoscope-findings-YYYYMMDDHHmmss`). `npm run findings:reindex` streams every finding out of PostgreSQL
+(keyset pagination, 5,000 rows per batch), bulk-loads a new index with refreshes switched off, and then
+moves the alias in one atomic `updateAliases` call: searches never see a half-built index, and a mapping
+change never needs downtime. The scan worker keeps it current: it bulk-indexes a scan's findings with the
+finding id as `_id` (a retried job overwrites, never duplicates) and `refresh: wait_for` (searchable before
+the job reports "completed"), then flips the asset's older findings to `is_current: false` with an
+`update_by_query`.
+
+**Mapping choices.**
+
+| Field | Type | Why |
+| --- | --- | --- |
+| `host` | `keyword` + `host.parts` (pattern tokenizer on non-alphanumerics) | `qa.zeuz.ai` is indexed as `qa`, `zeuz`, `ai`, so "zeuz" finds it |
+| `title`, `description`, `recommendation` | `text` with the `english` analyzer | Stemming: "expired" matches "expires" |
+| `severity`, `category`, `rule_id`, ids | `keyword` | Exact filters and aggregations |
+| `is_current` | `boolean` | "Current only" is a cheap, cached filter |
+| `evidence` | `flattened` | Arbitrary JSON without a mapping explosion |
+
+**Query.** One clause per word, and every word must match (AND). Each word may match in any field (OR),
+either with typo tolerance (`fuzziness: AUTO`, first letter fixed) or as a prefix (`phrase_prefix`, for
+search-as-you-type). Host matches are boosted 3x and title matches 2x. So "globex certifcate expird" finds expired
+certificates on Globex hosts, even though the three words live in different fields and two are misspelled.
+
+**Filters and facets.** "Current only" and the rule go in **filter context** (no scoring, cached).
+Severity and category go in `post_filter`, which runs *after* the aggregations, so the severity chips
+keep showing counts for every severity while you have only "critical" selected.
+
+**Highlights without XSS.** Highlights come back wrapped in the control characters `\u0001` / `\u0002`
+instead of `<em>` tags. The frontend splits on them and renders `<mark>` elements itself, so text from the
+index is never injected as HTML.
+
