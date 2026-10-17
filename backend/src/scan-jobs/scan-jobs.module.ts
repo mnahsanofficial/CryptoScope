@@ -23,5 +23,6 @@ import { ScanProcessor } from './scan.processor';
   ],
   controllers: [ScanJobsController],
   providers: [ScanQueueService, BatchTracker, ScanProcessor, ScanEventsGateway, ScanQueueEventsListener],
+  exports: [ScanQueueService],
 })
 export class ScanJobsModule {}
