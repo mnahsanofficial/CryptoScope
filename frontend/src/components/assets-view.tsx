@@ -5,17 +5,17 @@ import { apiFetch, queryString } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { timeAgo } from "@/lib/format";
 import { useScanEvents } from "@/lib/scan-events-context";
+import { isFinished } from "@/lib/scan-events-reducer";
 import { useDebounced } from "@/lib/use-debounced";
 import type { Asset, Paginated, RiskLevel } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
-import { Button, Card, ErrorNote, Pagination, RiskBadge, Skeleton, tableClasses as t } from "./ui/primitives";
+import { Button, Card, ErrorNote, HostName, inputClass, Pagination, RiskBadge, SearchInput, Skeleton, tableClasses as t } from "./ui/primitives";
 
 const RISK_LEVELS: RiskLevel[] = ["critical", "high", "medium", "low", "none"];
-const inputClass = "rounded-lg border border-hairline bg-page px-3 py-2 text-sm outline-none focus:border-accent";
 
 export function AssetsView() {
   const { isAdmin } = useAuth();
-  const { finishedCount } = useScanEvents();
+  const { finishedCount, jobs } = useScanEvents();
   const [search, setSearch] = useState("");
   const [riskLevel, setRiskLevel] = useState("");
   const [environment, setEnvironment] = useState("");
@@ -24,6 +24,7 @@ export function AssetsView() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [actionError, setActionError] = useState<string | null>(null);
   const debouncedSearch = useDebounced(search);
+  const pending = search !== debouncedSearch; // typed, not searched yet: dim the old rows
 
   /** Changing a filter always starts again at page 1. */
   const filter = <T,>(set: (value: T) => void) => (value: T) => {
@@ -53,6 +54,8 @@ export function AssetsView() {
       setSelected(new Set());
     });
   const scanOne = (id: string) => run(() => apiFetch(`/assets/${id}/scans`, { method: "POST" }));
+  /** Assets with a scan queued or running: their Scan button shows that instead of inviting a second click. */
+  const scanning = new Set(jobs.filter((j) => !isFinished(j)).map((j) => j.assetId));
 
   const rows = assets.data?.data ?? [];
   const allOnPageSelected = rows.length > 0 && rows.every((a) => selected.has(a.id));
@@ -78,8 +81,8 @@ export function AssetsView() {
           <p className="text-sm text-ink-2">TLS endpoints in the inventory, with the risk of their latest scan.</p>
         </div>
         {isAdmin && (
-          <Button onClick={scanSelected} disabled={selected.size === 0}>
-            Scan selected ({selected.size})
+          <Button onClick={scanSelected} disabled={selected.size === 0} title={selected.size === 0 ? "Tick assets in the table first" : undefined}>
+            {selected.size > 0 ? `Scan ${selected.size} selected` : "Scan selected"}
           </Button>
         )}
       </div>
@@ -89,20 +92,20 @@ export function AssetsView() {
 
       <Card>
         <div className="mb-4 flex flex-wrap gap-2">
-          <input aria-label="Search hosts" placeholder="Search host…" value={search} onChange={(e) => filter(setSearch)(e.target.value)} className={`${inputClass} min-w-56 flex-1`} />
-          <select aria-label="Risk level" value={riskLevel} onChange={(e) => filter(setRiskLevel)(e.target.value)} className={inputClass}>
+          <SearchInput label="Search hosts" placeholder="Search host or URL…" value={search} onChange={filter(setSearch)} className="min-w-56 flex-1" />
+          <select aria-label="Risk level" value={riskLevel} onChange={(e) => filter(setRiskLevel)(e.target.value)} className={`${inputClass} flex-1 sm:flex-none`}>
             <option value="">All risk levels</option>
             {RISK_LEVELS.map((l) => (
               <option key={l} value={l}>{l[0].toUpperCase() + l.slice(1)}</option>
             ))}
           </select>
-          <select aria-label="Environment" value={environment} onChange={(e) => filter(setEnvironment)(e.target.value)} className={inputClass}>
+          <select aria-label="Environment" value={environment} onChange={(e) => filter(setEnvironment)(e.target.value)} className={`${inputClass} flex-1 sm:flex-none`}>
             <option value="">All environments</option>
             <option value="production">Production</option>
             <option value="staging">Staging</option>
             <option value="development">Development</option>
           </select>
-          <select aria-label="Sort by" value={sort} onChange={(e) => filter(setSort)(e.target.value)} className={inputClass}>
+          <select aria-label="Sort by" value={sort} onChange={(e) => filter(setSort)(e.target.value)} className={`${inputClass} flex-1 sm:flex-none`}>
             <option value="riskScore">Highest risk first</option>
             <option value="lastScannedAt">Recently scanned</option>
             <option value="host">Host A–Z</option>
@@ -113,7 +116,7 @@ export function AssetsView() {
         {!assets.data && !assets.error ? (
           <Skeleton className="h-96" />
         ) : (
-          <div className="overflow-x-auto">
+          <div className={t.wrap}>
             <table className={t.table}>
               <thead>
                 <tr>
@@ -123,14 +126,15 @@ export function AssetsView() {
                     </th>
                   )}
                   <th className={t.th}>Host</th>
-                  <th className={t.th}>Environment</th>
+                  <th className={`${t.th} hidden md:table-cell`}>Environment</th>
                   <th className={t.th}>Risk</th>
                   <th className={`${t.th} text-right`}>Score</th>
-                  <th className={t.th}>Last scan</th>
-                  {isAdmin && <th className={t.th} />}
+                  <th className={`${t.th} hidden sm:table-cell`}>Last scan</th>
+                  {/* Phones scan through the checkboxes + "Scan selected", which leaves the host column room to breathe. */}
+                  {isAdmin && <th className={`${t.th} hidden sm:table-cell`}><span className="sr-only">Actions</span></th>}
                 </tr>
               </thead>
-              <tbody className={assets.loading ? "opacity-60" : ""}>
+              <tbody className={`transition-opacity ${assets.loading || pending ? "opacity-50" : ""}`}>
                 {rows.map((a) => (
                   <tr key={a.id}>
                     {isAdmin && (
@@ -139,17 +143,24 @@ export function AssetsView() {
                       </td>
                     )}
                     <td className={t.td}>
-                      <span className="font-medium">{a.host}</span>
+                      <span className="font-medium"><HostName host={a.host} /></span>
                       {a.port !== 443 && <span className="text-ink-muted">:{a.port}</span>}
                       {a.label && <span className="block text-xs text-ink-muted">{a.label}</span>}
+                      {/* Columns hidden on small screens move under the host. */}
+                      <span className="block text-xs text-ink-muted md:hidden">
+                        {a.environment}
+                        <span className="sm:hidden"> · {timeAgo(a.lastScannedAt)}</span>
+                      </span>
                     </td>
-                    <td className={`${t.td} text-ink-2`}>{a.environment}</td>
-                    <td className={t.td}><RiskBadge level={a.latestRiskLevel} /></td>
+                    <td className={`${t.td} hidden capitalize text-ink-2 md:table-cell`}>{a.environment}</td>
+                    <td className={`${t.td} whitespace-nowrap`}><RiskBadge level={a.latestRiskLevel} /></td>
                     <td className={`${t.td} tabular text-right`}>{a.latestRiskScore ?? "–"}</td>
-                    <td className={`${t.td} text-ink-2`}>{timeAgo(a.lastScannedAt)}</td>
+                    <td className={`${t.td} hidden whitespace-nowrap text-ink-2 sm:table-cell`}>{timeAgo(a.lastScannedAt)}</td>
                     {isAdmin && (
-                      <td className={`${t.td} text-right`}>
-                        <Button variant="ghost" onClick={() => scanOne(a.id)}>Scan</Button>
+                      <td className={`${t.td} hidden text-right sm:table-cell`}>
+                        <Button variant="ghost" className="whitespace-nowrap" onClick={() => scanOne(a.id)} disabled={scanning.has(a.id)}>
+                          {scanning.has(a.id) ? "Scanning…" : "Scan"}
+                        </Button>
                       </td>
                     )}
                   </tr>
@@ -195,30 +206,35 @@ function AddAssetForm({ onAdded, onError }: { onAdded: () => void; onError: (mes
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-wrap items-end gap-2 rounded-xl border border-hairline bg-surface p-4">
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-ink-2">Host</span>
-        <input required value={host} onChange={(e) => setHost(e.target.value)} placeholder="example.com" className={inputClass} />
-      </label>
-      <label className="flex w-24 flex-col gap-1 text-sm">
-        <span className="text-ink-2">Port</span>
-        <input required type="number" min={1} max={65535} value={port} onChange={(e) => setPort(e.target.value)} className={inputClass} />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-ink-2">Environment</span>
-        <select value={environment} onChange={(e) => setEnvironment(e.target.value)} className={inputClass}>
-          <option value="production">Production</option>
-          <option value="staging">Staging</option>
-          <option value="development">Development</option>
-        </select>
-      </label>
-      <label className="flex items-center gap-2 self-center text-sm text-ink-2">
-        <input type="checkbox" checked={scanNow} onChange={(e) => setScanNow(e.target.checked)} />
-        Scan right away
-      </label>
-      <Button type="submit" variant="secondary" disabled={saving || !host}>
-        {saving ? "Adding…" : "Add asset"}
-      </Button>
+    <form onSubmit={submit} className="rounded-xl border border-hairline bg-surface p-4 sm:p-5">
+      <h2 className="text-base font-semibold">Add an asset</h2>
+      <p className="mb-3 mt-0.5 text-sm text-ink-2">A host name or URL. It is scanned right away unless you untick the box.</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex min-w-48 flex-1 flex-col gap-1 text-sm sm:flex-none">
+          <span className="text-ink-2">Host</span>
+          <input required value={host} onChange={(e) => setHost(e.target.value)} placeholder="example.com" className={`${inputClass} sm:w-64`} />
+        </label>
+        <label className="flex w-24 flex-col gap-1 text-sm">
+          <span className="text-ink-2">Port</span>
+          <input required type="number" min={1} max={65535} value={port} onChange={(e) => setPort(e.target.value)} className={inputClass} />
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-ink-2">Environment</span>
+          <select value={environment} onChange={(e) => setEnvironment(e.target.value)} className={inputClass}>
+            <option value="production">Production</option>
+            <option value="staging">Staging</option>
+            <option value="development">Development</option>
+          </select>
+        </label>
+        {/* h-[38px]: same height as the inputs, so the checkbox lines up with their text */}
+        <label className="flex h-[38px] items-center gap-2 px-1 text-sm text-ink-2">
+          <input type="checkbox" checked={scanNow} onChange={(e) => setScanNow(e.target.checked)} />
+          Scan right away
+        </label>
+        <Button type="submit" disabled={saving || !host}>
+          {saving ? "Adding…" : "Add asset"}
+        </Button>
+      </div>
     </form>
   );
 }

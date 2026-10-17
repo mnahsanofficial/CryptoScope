@@ -15,6 +15,16 @@ const STAGE_LABEL: Record<ScanProgress["stage"], string> = {
   failed: "Failed",
 };
 
+/**
+ * A job can complete (it ran fine) while the scan itself failed (host unreachable): saying "Done" for
+ * that would read as success, so the result decides the label.
+ */
+export function jobStatus(job: ScanProgress): { label: string; tone: "ok" | "bad" } {
+  if (job.stage === "completed" && job.result?.status === "failed") return { label: "Unreachable", tone: "bad" };
+  const label = STAGE_LABEL[job.stage] + (job.stage === "retrying" ? ` (${job.attempt}/${job.maxAttempts})` : "");
+  return { label, tone: job.stage === "failed" ? "bad" : "ok" };
+}
+
 /** Floating panel with live scan progress pushed over Socket.IO. Hidden when nothing is being tracked. */
 export function ScanProgressPanel() {
   const events = useScanEvents();
@@ -50,20 +60,20 @@ export function ScanProgressPanel() {
       ))}
 
       <ul className="max-h-56 space-y-2 overflow-y-auto">
-        {events.jobs.slice(0, 8).map((job) => (
-          <li key={job.jobId} className="text-xs">
-            <div className="mb-1 flex justify-between gap-2">
-              <span className="truncate text-ink-2" title={job.message}>
-                {job.message ?? (job.stage === "queued" ? "Waiting in queue" : `Scan ${job.jobId.slice(0, 8)}`)}
-              </span>
-              <span className={`shrink-0 font-medium ${job.stage === "failed" ? "text-danger" : "text-ink"}`}>
-                {STAGE_LABEL[job.stage]}
-                {job.stage === "retrying" ? ` (${job.attempt}/${job.maxAttempts})` : ""}
-              </span>
-            </div>
-            {!isFinished(job) && <ProgressBar percent={job.percent} label={`Scan ${job.jobId}`} />}
-          </li>
-        ))}
+        {events.jobs.slice(0, 8).map((job) => {
+          const status = jobStatus(job);
+          return (
+            <li key={job.jobId} className="text-xs">
+              <div className="mb-1 flex justify-between gap-2">
+                <span className="truncate text-ink-2" title={job.message}>
+                  {job.message ?? (job.stage === "queued" ? "Waiting in queue" : `Scan ${job.jobId.slice(0, 8)}`)}
+                </span>
+                <span className={`shrink-0 font-medium ${status.tone === "bad" ? "text-danger" : "text-ink"}`}>{status.label}</span>
+              </div>
+              {!isFinished(job) && <ProgressBar percent={job.percent} label={`Scan ${job.jobId}`} />}
+            </li>
+          );
+        })}
       </ul>
 
       {allDone && (

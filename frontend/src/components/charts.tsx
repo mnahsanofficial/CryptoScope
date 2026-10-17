@@ -101,40 +101,55 @@ export function completeBuckets<T extends { timestamp: string }>(buckets: T[], n
   return buckets.filter((b) => Date.parse(b.timestamp) + size <= now);
 }
 
+/**
+ * Hours with no handshakes at all have no data: they become gaps (null), not a line at zero, which would
+ * read as "no weak traffic". `lastDataAt` is the last hour that had any traffic, to say where data stops.
+ */
+export function withGaps<T extends { timestamp: string; total: number; weak: number }>(buckets: T[]) {
+  const points = buckets.map((b) => ({ ...b, weak: b.total === 0 ? null : b.weak }));
+  const last = [...buckets].reverse().find((b) => b.total > 0);
+  const trailingGap = last !== undefined && last !== buckets[buckets.length - 1];
+  return { points, lastDataAt: trailingGap ? last.timestamp : null };
+}
+
 /** Line + wash: weak handshakes per time bucket. Hover shows the bucket's weak count, total and share. */
 export function WeakHandshakesChart({ data }: { data: WeakPerInterval }) {
-  const buckets = completeBuckets(data.buckets);
-  const ticks = niceTicks(Math.max(0, ...buckets.map((b) => b.weak)));
+  const { points: buckets, lastDataAt } = withGaps(completeBuckets(data.buckets));
+  const ticks = niceTicks(Math.max(0, ...buckets.map((b) => b.weak ?? 0)));
   return (
-    <ResponsiveContainer width="100%" height={240}>
-      <AreaChart data={buckets} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-        <CartesianGrid vertical={false} stroke="var(--grid)" />
-        <XAxis dataKey="timestamp" tickFormatter={dayLabel} minTickGap={48} {...axisProps} />
-        <YAxis width={44} axisLine={false} ticks={ticks} domain={[0, ticks[ticks.length - 1]]} tickFormatter={compact} {...axisProps} />
-        <Tooltip
-          cursor={{ stroke: "var(--axis)", strokeWidth: 1 }}
-          content={({ active, payload }) => {
-            const b = payload?.[0]?.payload as WeakPerInterval["buckets"][number] | undefined;
-            if (!active || !b) return null;
-            return (
-              <TooltipBox
-                title={hourLabel(b.timestamp)}
-                rows={[["Weak", formatNumber(b.weak)], ["All handshakes", formatNumber(b.total)], ["Weak share", formatPercent(b.weakPercentage)]]}
-              />
-            );
-          }}
-        />
-        <Area
-          type="monotone"
-          dataKey="weak"
-          stroke="var(--series-2)"
-          strokeWidth={2}
-          fill="var(--series-2)"
-          fillOpacity={0.1}
-          activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--surface)" }}
-          isAnimationActive={false}
-        />
-      </AreaChart>
-    </ResponsiveContainer>
+    <>
+      <ResponsiveContainer width="100%" height={240}>
+        <AreaChart data={buckets} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <CartesianGrid vertical={false} stroke="var(--grid)" />
+          <XAxis dataKey="timestamp" tickFormatter={dayLabel} minTickGap={48} {...axisProps} />
+          <YAxis width={44} axisLine={false} ticks={ticks} domain={[0, ticks[ticks.length - 1]]} tickFormatter={compact} {...axisProps} />
+          <Tooltip
+            cursor={{ stroke: "var(--axis)", strokeWidth: 1 }}
+            content={({ active, payload }) => {
+              const b = payload?.[0]?.payload as (typeof buckets)[number] | undefined;
+              if (!active || !b) return null;
+              if (b.weak === null) return <TooltipBox title={hourLabel(b.timestamp)} rows={[["Handshakes", "none logged"]]} />;
+              return (
+                <TooltipBox
+                  title={hourLabel(b.timestamp)}
+                  rows={[["Weak", formatNumber(b.weak)], ["All handshakes", formatNumber(b.total)], ["Weak share", formatPercent(b.weakPercentage)]]}
+                />
+              );
+            }}
+          />
+          <Area
+            type="monotone"
+            dataKey="weak"
+            stroke="var(--series-2)"
+            strokeWidth={2}
+            fill="var(--series-2)"
+            fillOpacity={0.1}
+            activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--surface)" }}
+            isAnimationActive={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
+      {lastDataAt && <p className="mt-2 text-xs text-ink-muted">No handshakes logged after {hourLabel(lastDataAt)}:00.</p>}
+    </>
   );
 }
