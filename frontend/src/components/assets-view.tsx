@@ -6,9 +6,12 @@ import { useAuth } from "@/lib/auth-context";
 import { timeAgo } from "@/lib/format";
 import { useScanEvents } from "@/lib/scan-events-context";
 import { isFinished } from "@/lib/scan-events-reducer";
+import { scanErrorLabel } from "@/lib/scan-errors";
 import { useDebounced } from "@/lib/use-debounced";
 import type { Asset, Paginated, RiskLevel } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
+import { useThrottled } from "@/lib/use-throttled";
+import { LastScan } from "./ui/last-scan";
 import { Button, Card, ErrorNote, HostName, inputClass, Pagination, RiskBadge, SearchInput, Skeleton, tableClasses as t } from "./ui/primitives";
 
 const RISK_LEVELS: RiskLevel[] = ["critical", "high", "medium", "low", "none"];
@@ -34,10 +37,13 @@ export function AssetsView() {
 
   const path = `/assets${queryString({ search: debouncedSearch, riskLevel, environment, sort, order: sort === "host" ? "asc" : "desc", page, pageSize: 20 })}`;
   const assets = useApi<Paginated<Asset>>(path);
+  // One reload per burst of finished scans (see OverviewView).
+  const finished = useThrottled(finishedCount, 1000);
   const { reload } = assets;
   useEffect(() => {
-    if (finishedCount > 0) reload();
-  }, [finishedCount, reload]);
+    if (finished > 0) reload();
+  }, [finished, reload]);
+  const [starting, setStarting] = useState(false);
 
   async function run(action: () => Promise<unknown>) {
     setActionError(null);
@@ -48,11 +54,14 @@ export function AssetsView() {
     }
   }
 
-  const scanSelected = () =>
-    run(async () => {
+  const scanSelected = async () => {
+    setStarting(true); // until the request returns, so a double click can't queue the batch twice
+    await run(async () => {
       await apiFetch("/scan-jobs", { method: "POST", body: { assetIds: [...selected] } });
       setSelected(new Set());
     });
+    setStarting(false);
+  };
   const scanOne = (id: string) => run(() => apiFetch(`/assets/${id}/scans`, { method: "POST" }));
   /** Assets with a scan queued or running: their Scan button shows that instead of inviting a second click. */
   const scanning = new Set(jobs.filter((j) => !isFinished(j)).map((j) => j.assetId));
@@ -81,7 +90,7 @@ export function AssetsView() {
           <p className="text-sm text-ink-2">TLS endpoints in the inventory, with the risk of their latest scan.</p>
         </div>
         {isAdmin && (
-          <Button onClick={scanSelected} disabled={selected.size === 0} title={selected.size === 0 ? "Tick assets in the table first" : undefined}>
+          <Button onClick={scanSelected} disabled={selected.size === 0 || starting} title={selected.size === 0 ? "Tick assets in the table first" : undefined}>
             {selected.size > 0 ? `Scan ${selected.size} selected` : "Scan selected"}
           </Button>
         )}
@@ -150,12 +159,13 @@ export function AssetsView() {
                       <span className="block text-xs text-ink-muted md:hidden">
                         {a.environment}
                         <span className="sm:hidden"> · {timeAgo(a.lastScannedAt)}</span>
+                        {a.lastScanError && <span className="block font-medium text-danger sm:hidden">{scanErrorLabel(a.lastScanError)}</span>}
                       </span>
                     </td>
                     <td className={`${t.td} hidden capitalize text-ink-2 md:table-cell`}>{a.environment}</td>
                     <td className={`${t.td} whitespace-nowrap`}><RiskBadge level={a.latestRiskLevel} /></td>
                     <td className={`${t.td} tabular text-right`}>{a.latestRiskScore ?? "–"}</td>
-                    <td className={`${t.td} hidden whitespace-nowrap text-ink-2 sm:table-cell`}>{timeAgo(a.lastScannedAt)}</td>
+                    <td className={`${t.td} hidden whitespace-nowrap text-ink-2 sm:table-cell`}><LastScan at={a.lastScannedAt} error={a.lastScanError} /></td>
                     {isAdmin && (
                       <td className={`${t.td} hidden text-right sm:table-cell`}>
                         <Button variant="ghost" className="whitespace-nowrap" onClick={() => scanOne(a.id)} disabled={scanning.has(a.id)}>

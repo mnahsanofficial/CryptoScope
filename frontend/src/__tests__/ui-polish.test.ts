@@ -34,8 +34,9 @@ describe("jobStatus", () => {
     jobId: "j", assetId: "a", scanId: "s", batchId: null, stage, percent: 100, attempt: 2, maxAttempts: 3, result,
   });
 
-  it("says Unreachable, not Done, when the job finished but the scan failed", () => {
-    expect(jobStatus(job("completed", { status: "failed", riskScore: null, riskLevel: null, errorCode: "DNS_NOT_FOUND" }))).toEqual({ label: "Unreachable", tone: "bad" });
+  it("names the failure, not Done, when the job finished but the scan failed", () => {
+    expect(jobStatus(job("completed", { status: "failed", riskScore: null, riskLevel: null, errorCode: "DNS_NOT_FOUND" }))).toEqual({ label: "Host not found", tone: "bad" });
+    expect(jobStatus(job("completed", { status: "failed", riskScore: null, riskLevel: null, errorCode: "WHATEVER" })).label).toBe("Scan failed");
     expect(jobStatus(job("completed", { status: "success", riskScore: 10, riskLevel: "low", errorCode: null }))).toEqual({ label: "Done", tone: "ok" });
     expect(jobStatus(job("retrying"))).toEqual({ label: "Retrying (2/3)", tone: "ok" });
     expect(jobStatus(job("failed")).tone).toBe("bad");

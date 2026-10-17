@@ -6,6 +6,7 @@ import { formatDate, formatNumber } from "@/lib/format";
 import { useScanEvents } from "@/lib/scan-events-context";
 import type { Finding, FindingCategory, FindingSearchResponse, Paginated, Severity } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
+import { useThrottled } from "@/lib/use-throttled";
 import { useDebounced } from "@/lib/use-debounced";
 import { Highlighted } from "./ui/highlighted";
 import { Button, Card, ErrorNote, inputClass, Pagination, RiskBadge, SearchInput, Skeleton, tableClasses as t } from "./ui/primitives";
@@ -65,10 +66,12 @@ export function FindingsView() {
   const results = useApi<FindingSearchResponse>(searching ? searchPath : null);
   const active = searching ? results : list;
 
+  // One reload per burst of finished scans (see OverviewView).
+  const finished = useThrottled(finishedCount, 1000);
   const { reload } = active;
   useEffect(() => {
-    if (finishedCount > 0) reload();
-  }, [finishedCount, reload]);
+    if (finished > 0) reload();
+  }, [finished, reload]);
 
   const rows: Row[] = searching ? (results.data?.data ?? []) : (list.data?.data ?? []).map(fromList);
   const meta = searching ? results.data?.meta : list.data?.meta;

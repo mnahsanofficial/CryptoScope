@@ -37,6 +37,8 @@ export interface Asset {
   latestRiskScore: number | null;
   latestRiskLevel: RiskLevel | null;
   lastScannedAt: string | null;
+  /** Why the most recent scan failed (e.g. "DNS_NOT_FOUND"); null when it succeeded. */
+  lastScanError: string | null;
 }
 
 export interface Finding {

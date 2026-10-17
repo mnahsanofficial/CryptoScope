@@ -2,6 +2,7 @@
 
 import { useScanEvents } from "@/lib/scan-events-context";
 import { isFinished, overallProgress } from "@/lib/scan-events-reducer";
+import { scanErrorLabel } from "@/lib/scan-errors";
 import type { ScanProgress } from "@/lib/types";
 import { Button, ProgressBar } from "./ui/primitives";
 
@@ -20,7 +21,7 @@ const STAGE_LABEL: Record<ScanProgress["stage"], string> = {
  * that would read as success, so the result decides the label.
  */
 export function jobStatus(job: ScanProgress): { label: string; tone: "ok" | "bad" } {
-  if (job.stage === "completed" && job.result?.status === "failed") return { label: "Unreachable", tone: "bad" };
+  if (job.stage === "completed" && job.result?.status === "failed") return { label: scanErrorLabel(job.result.errorCode), tone: "bad" };
   const label = STAGE_LABEL[job.stage] + (job.stage === "retrying" ? ` (${job.attempt}/${job.maxAttempts})` : "");
   return { label, tone: job.stage === "failed" ? "bad" : "ok" };
 }
@@ -33,6 +34,7 @@ export function ScanProgressPanel() {
 
   const overall = overallProgress(events);
   const allDone = overall.active === 0;
+  const failed = events.jobs.filter((j) => jobStatus(j).tone === "bad").length;
 
   return (
     <aside
@@ -42,6 +44,7 @@ export function ScanProgressPanel() {
       <div className="mb-3 flex items-center justify-between">
         <h2 className="text-sm font-semibold">
           {allDone ? "Scans finished" : `Scanning ${overall.active} ${overall.active === 1 ? "asset" : "assets"}`}
+          {failed > 0 && <span className="font-normal text-danger"> · {failed} failed</span>}
         </h2>
         <span className="text-xs text-ink-muted">{events.connection === "connected" ? "● live" : events.connection}</span>
       </div>
