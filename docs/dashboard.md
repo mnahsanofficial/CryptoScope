@@ -84,8 +84,10 @@ Found in a product-design pass over every page (desktop and 375 px phone, light 
 | Two clear buttons in search boxes (ours plus the browser's) | The native WebKit cancel button is hidden; one shared `SearchInput` (icon, clear, Esc) is used on every page |
 | Old rows stayed fully visible while a new search was pending | Rows dim while the debounced query catches up and while loading |
 | "Page 1 of 1 · 0 total" and disabled Previous/Next on empty or single-page results | Pagination hides on empty results and shows just the count on a single page |
-| A scan that couldn't reach its host said **Done** | The live panel says **Unreachable** (in red) when the job finished but the scan failed |
-| The scan button invited a second click while a scan was already running | Rows with a queued or running scan show **Scanning…** (disabled) |
+| A scan that couldn't reach its host said **Done** | The live panel names the failure ("Host not found", "Timed out") in red, and its header counts failures |
+| After a failed rescan the table said "just now · Critical 100", as if that were a fresh result | `assets.last_scan_error` (set on failure, cleared on success) shows as "just now / Host not found"; the tooltip explains the risk is from the last successful scan |
+| Rescanning 8 assets fired 24 reloads, 21 of which cancelled each other (red in DevTools) | Reloads after finished scans are throttled to one per second |
+| The scan buttons invited a second click while a scan was already running, queueing a duplicate batch | **Rescan riskiest** shows **Rescanning…** and rows show **Scanning…** (disabled) until their scans finish |
 | "Expired 4206 days ago" and "32 min / ago" wrapping in tables | Long spans read as months/years ("Expired 11 years ago", exact days in the tooltip); short cells never wrap |
 | Hours with no traffic were drawn as zero weak handshakes, which reads as "all fixed" | Empty hours are gaps, and a note says where the data stops |
 | On phones the nav links were icons with no accessible name (`display: none` labels) | Labels are visually hidden (`sr-only`), so screen readers still announce them |

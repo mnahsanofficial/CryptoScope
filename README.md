@@ -302,7 +302,7 @@ One slow query and its fix (an index, **214x faster**, `EXPLAIN ANALYZE` before/
 | --- | --- | --- | --- |
 | Backend unit | `cd backend && npm test` | 240 | Scanner (real local TLS servers), DER parser, every risk rule, mappers, query builders, worker retry policy, scrypt, JWT config, SSRF policy, crypto providers (shared contract tests) |
 | Backend e2e | `cd backend && npm run test:e2e` | 63 | Real app + Postgres + Redis/BullMQ + Elasticsearch + Socket.IO: CRUD, async scans, retries, analytics with exact counts, auth/roles, an audit of every route, rate limits, sign/verify |
-| Frontend | `cd frontend && npm test` | 31 | Live-event reducer, API client, session/JWT expiry, chart helpers (ticks, gaps), login form, search highlighting, date/expiry labels, scan status labels |
+| Frontend | `cd frontend && npm test` | 34 | Live-event reducer, API client, session/JWT expiry, chart helpers (ticks, gaps), login form, search highlighting, date/expiry labels, scan failure labels, reload throttling |
 
 **CI** (GitHub Actions, [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs, on every push and PR:
 
