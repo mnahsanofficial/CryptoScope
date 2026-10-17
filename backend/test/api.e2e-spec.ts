@@ -66,6 +66,17 @@ describe('CryptoScope API (e2e)', () => {
       expect(res.body.data.map((a: { host: string }) => a.host)).toEqual(['c.bank.com']);
     });
 
+    it('search accepts a full URL or host:port, like the add form does', async () => {
+      await createAsset({ host: 'https://qa.zeuz.ai/' }); // stored as host qa.zeuz.ai, port 443
+      await createAsset({ host: 'qa.zeuz.ai', port: 8443 });
+
+      const byUrl = await api().get(`/api/assets?search=${encodeURIComponent('https://qa.zeuz.ai/')}`).expect(200);
+      const byHostPort = await api().get('/api/assets?search=qa.zeuz.ai:8443').expect(200);
+
+      expect(byUrl.body.meta.total).toBe(2);
+      expect(byHostPort.body.data.map((a: { port: number }) => a.port)).toEqual([8443]);
+    });
+
     it('treats LIKE wildcards in search literally', async () => {
       await createAsset({ host: 'shop.com' });
       const res = await api().get('/api/assets?search=%25').expect(200); // "%" must not match everything

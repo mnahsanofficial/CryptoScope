@@ -7,6 +7,7 @@ import { ScanError } from '../scanner/scan-error';
 import { parseTarget } from '../scanner/scan-target';
 import { Asset } from './asset.entity';
 import { CreateAssetDto, ListAssetsQueryDto, UpdateAssetDto } from './dto/asset.dto';
+import { parseHostSearch } from './host-search';
 
 // Whitelist: user input picks a key, never a raw column name (prevents SQL injection via ?sort=).
 const SORT_COLUMNS: Record<ListAssetsQueryDto['sort'], string> = {
@@ -33,7 +34,10 @@ export class AssetsService {
     const qb = this.assets.createQueryBuilder('asset');
 
     if (query.search) {
-      qb.andWhere('asset.host ILIKE :search', { search: `%${escapeLike(query.search)}%` });
+      // Accepts what people paste: "https://qa.zeuz.ai/" searches for host "qa.zeuz.ai".
+      const { host, port } = parseHostSearch(query.search);
+      if (host) qb.andWhere('asset.host ILIKE :search', { search: `%${escapeLike(host)}%` });
+      if (port) qb.andWhere('asset.port = :port', { port });
     }
     if (query.riskLevel?.length) {
       qb.andWhere('asset.latestRiskLevel IN (:...riskLevels)', { riskLevels: query.riskLevel });
