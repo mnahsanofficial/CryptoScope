@@ -1,6 +1,7 @@
 /** Shared setup for the e2e tests that boot the whole app. */
 import { INestApplication } from '@nestjs/common';
 import { getQueueToken } from '@nestjs/bullmq';
+import { Client as EsClient } from '@elastic/elasticsearch';
 import { Queue } from 'bullmq';
 import Redis from 'ioredis';
 import { NestExpressApplication } from '@nestjs/platform-express';
@@ -105,6 +106,19 @@ export function client(app: INestApplication, token?: string) {
     patch: (url: string) => withAuth(server().patch(url)),
     delete: (url: string) => withAuth(server().delete(url)),
   };
+}
+
+/**
+ * Deletes an index whether `name` is an alias (delete the indices behind it) or a plain index.
+ * Elasticsearch refuses to delete an alias by name, and wildcard deletes are disabled by default.
+ */
+export async function deleteIndexOrAlias(es: EsClient, name: string): Promise<void> {
+  if (await es.indices.existsAlias({ name })) {
+    const indices = Object.keys(await es.indices.getAlias({ name }));
+    for (const index of indices) await es.indices.delete({ index });
+  } else {
+    await es.indices.delete({ index: name }, { ignore: [404] });
+  }
 }
 
 /** Removes everything the tests put in Redis: all jobs of the test queue and the batch counters. */

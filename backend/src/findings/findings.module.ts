@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Finding } from './finding.entity';
 import { FindingsController } from './findings.controller';
 import { FINDINGS_INDEX, FindingsIndexer } from './findings-indexer.service';
+import { FindingsSearchService } from './findings-search.service';
 import { FindingsService } from './findings.service';
 
 @Module({
@@ -13,6 +14,7 @@ import { FindingsService } from './findings.service';
   providers: [
     FindingsService,
     FindingsIndexer,
+    FindingsSearchService,
     {
       provide: FINDINGS_INDEX,
       inject: [ConfigService],

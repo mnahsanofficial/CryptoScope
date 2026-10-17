@@ -10,7 +10,17 @@ import { DataSource } from 'typeorm';
 import { FindingsIndexer } from '../src/findings/findings-indexer.service';
 import { BatchProgress, ScanProgress } from '../src/scan-jobs/scan-job.types';
 import { ScanProcessor } from '../src/scan-jobs/scan.processor';
-import { bootTestApp, cleanUpTestQueue, client, closedPort, startTlsServer, TEST_FINDINGS_INDEX, TestTokens, waitForJob } from './helpers';
+import {
+  bootTestApp,
+  cleanUpTestQueue,
+  client,
+  closedPort,
+  deleteIndexOrAlias,
+  startTlsServer,
+  TEST_FINDINGS_INDEX,
+  TestTokens,
+  waitForJob,
+} from './helpers';
 
 describe('Async scan pipeline (e2e)', () => {
   let app: INestApplication;
@@ -26,6 +36,9 @@ describe('Async scan pipeline (e2e)', () => {
   beforeAll(async () => {
     ({ server: tlsServer, port: tlsPort } = await startTlsServer());
     ({ app, db, url, tokens } = await bootTestApp());
+    // Start from a fresh findings index with the current mapping (a previous run may have left one).
+    await deleteIndexOrAlias(app.get(Client), TEST_FINDINGS_INDEX);
+    await app.get(FindingsIndexer).ensureIndex();
 
     socket = io(`${url}/scans`, { transports: ['websocket'], auth: { token: tokens.viewer } }); // viewers may watch
     await new Promise<void>((resolve, reject) => {
@@ -39,7 +52,7 @@ describe('Async scan pipeline (e2e)', () => {
   afterAll(async () => {
     socket?.disconnect();
     await cleanUpTestQueue(app);
-    await app.get(Client).indices.delete({ index: TEST_FINDINGS_INDEX }, { ignore: [404] });
+    await deleteIndexOrAlias(app.get(Client), TEST_FINDINGS_INDEX);
     await app?.close();
     await new Promise((resolve) => tlsServer?.close(resolve));
   });
@@ -187,5 +200,54 @@ describe('Async scan pipeline (e2e)', () => {
 
     const hit = await es.search({ index: TEST_FINDINGS_INDEX, query: { match: { description: 'self-signed' } } });
     expect(hit.hits.hits[0]._source).toMatchObject({ host: '127.0.0.1', rule_id: 'CERT_SELF_SIGNED', severity: 'medium' });
+  });
+
+  describe('findings search (Elasticsearch)', () => {
+    const search = (query: string) => api().get(`/api/findings/search?pageSize=100&${query}`).expect(200);
+    // Other tests also scan 127.0.0.1, so look only at this test's asset.
+    type Hit = { assetId: string; ruleId: string; isCurrent: boolean; highlight: Record<string, string | undefined> };
+    const forAsset = (body: { data: Hit[] }, assetId: string) => body.data.filter((d) => d.assetId === assetId);
+
+    it('marks older findings as history when a newer scan of the same asset arrives', async () => {
+      const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
+      for (let i = 0; i < 2; i++) {
+        const { body } = await api().post(`/api/assets/${asset.id}/scans`).expect(202);
+        await waitForJob(app, tokens.admin, body.jobId);
+      }
+
+      const current = await search('q=self-signed');
+      const all = await search('q=self-signed&currentOnly=false');
+
+      expect(forAsset(current.body, asset.id)).toHaveLength(1); // only the latest scan's finding
+      expect(forAsset(all.body, asset.id)).toHaveLength(2); // both scans
+      expect(forAsset(current.body, asset.id)[0]).toMatchObject({ ruleId: 'CERT_SELF_SIGNED', isCurrent: true });
+    });
+
+    it('is typo-tolerant, matches across fields, highlights, and counts severities before the severity filter', async () => {
+      const asset = await createAsset({ host: '127.0.0.1', port: tlsPort });
+      const { body } = await api().post(`/api/assets/${asset.id}/scans`).expect(202);
+      await waitForJob(app, tokens.admin, body.jobId);
+
+      // "slef-signd" has two typos; "127" matches the host, "quantum" the text: words may match different fields.
+      const typo = await search('q=slef-signd');
+      const crossField = await search(`q=${encodeURIComponent('127 quantum')}`);
+      const filtered = await search('q=127&severity=critical');
+
+      const typoHit = forAsset(typo.body, asset.id)[0];
+      expect(typoHit.ruleId).toBe('CERT_SELF_SIGNED');
+      expect(typoHit.highlight.description).toContain('\u0001'); // highlight markers, not HTML
+      expect(forAsset(crossField.body, asset.id).map((d) => d.ruleId)).toEqual(
+        expect.arrayContaining(['QUANTUM_VULNERABLE_KEY', 'NO_PQ_KEY_EXCHANGE']),
+      );
+      expect(filtered.body.meta.total).toBe(0); // the local test server has no critical findings
+      // ...but the severity counts ignore the severity filter (post_filter), so "medium" still shows up.
+      expect(filtered.body.facets.severity.medium).toBeGreaterThanOrEqual(3);
+    });
+
+    it('validates input', async () => {
+      await api().get('/api/findings/search').expect(400); // q is required
+      await api().get('/api/findings/search?q=x&severity=urgent').expect(400);
+      await api().get('/api/findings/search?q=x&page=200&pageSize=100').expect(400); // beyond max_result_window
+    });
   });
 });
