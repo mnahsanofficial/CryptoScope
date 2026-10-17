@@ -16,7 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CryptoScope",
+  // Each page sets its own title ("Assets · CryptoScope"), so browser tabs and history are distinguishable.
+  title: { default: "CryptoScope", template: "%s · CryptoScope" },
   description: "Cryptographic inventory and quantum-risk dashboard",
 };
 
