@@ -130,6 +130,12 @@ describe('CryptoScope API (e2e)', () => {
       expect(failed).toMatchObject({ status: 'failed', errorCode: 'CONNECTION_REFUSED', riskScore: null, findings: [] });
       const refreshed = (await api().get(`/api/assets/${asset.id}`).expect(200)).body;
       expect(refreshed.latestRiskScore).toBe(30);
+      expect(refreshed.lastScanError).toBe('CONNECTION_REFUSED'); // so the UI can say the risk is from an earlier scan
+
+      // A successful scan clears it again
+      await api().patch(`/api/assets/${asset.id}`).send({ port: tlsPort }).expect(200);
+      await scanAndWait(app, tokens.admin, asset.id);
+      expect((await api().get(`/api/assets/${asset.id}`).expect(200)).body.lastScanError).toBeNull();
     });
 
     it('returns 404 when scanning an unknown asset', async () => {

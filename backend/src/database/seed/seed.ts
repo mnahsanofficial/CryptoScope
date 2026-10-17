@@ -170,6 +170,7 @@ function generateAsset(index: number, now: Date, batch: Batch): void {
 
   let latest: { score: number; level: Asset['latestRiskLevel'] } | null = null;
   let lastScannedAt = firstScanAt;
+  let lastScanError: ScanErrorCode | null = null;
 
   for (let i = 0; i < SCANS_PER_ASSET; i++) {
     const scannedAt = new Date(firstScanAt.getTime() + (i * SCAN_INTERVAL_DAYS + random.int(0, 5)) * DAY_MS);
@@ -187,9 +188,11 @@ function generateAsset(index: number, now: Date, batch: Batch): void {
     if (random.chance(0.03)) {
       const code = random.pick<ScanErrorCode>(['TIMEOUT', 'CONNECTION_REFUSED', 'DNS_NOT_FOUND']);
       batch.scans.push(toFailedScanRow({ id: scanId, assetId, scannedAt, durationMs }, new ScanError(code, `Simulated ${code}`)));
+      lastScanError = code;
       continue;
     }
 
+    lastScanError = null;
     const result = fakeScanResult(host, port, profile, cert, scannedAt);
     const risk = riskEngine.assess(result, scannedAt);
     batch.scans.push(toSuccessfulScanRow({ id: scanId, assetId, scannedAt, durationMs, certificateId: certId }, result, risk));
@@ -207,6 +210,7 @@ function generateAsset(index: number, now: Date, batch: Batch): void {
     latestRiskLevel: latest?.level ?? null,
     latestScanId: null, // set after the scans are inserted (the foreign key needs them to exist)
     lastScannedAt,
+    lastScanError,
     createdAt: new Date(firstScanAt.getTime() - DAY_MS),
   });
 }

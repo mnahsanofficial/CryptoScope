@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, LayoutDashboard, LogOut, Server, ShieldAlert, ShieldCheck } from "lucide-react";
+import { ChevronDown, LayoutDashboard, LogOut, Server, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useScanEvents } from "@/lib/scan-events-context";
 import { isFinished } from "@/lib/scan-events-reducer";
 import type { User } from "@/lib/types";
+import { BrandMark } from "./ui/brand";
 
 const NAV = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
@@ -28,9 +29,7 @@ export function Navbar() {
     <header className="sticky top-0 z-20 border-b border-hairline bg-surface/85 backdrop-blur supports-[backdrop-filter]:bg-surface/70">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-4 px-4 sm:px-6">
         <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="CryptoScope home">
-          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-white shadow-sm">
-            <ShieldCheck className="h-[18px] w-[18px]" strokeWidth={2.25} />
-          </span>
+          <BrandMark />
           <span className="hidden leading-tight sm:block">
             <span className="block text-sm font-semibold tracking-tight">CryptoScope</span>
             <span className="block text-[11px] text-ink-muted">Quantum-risk inventory</span>
@@ -45,10 +44,12 @@ export function Navbar() {
                 key={href}
                 href={href}
                 aria-current={active ? "page" : undefined}
+                title={label}
                 className={`relative flex items-center gap-2 px-3 text-sm transition-colors ${active ? "font-medium text-ink" : "text-ink-2 hover:text-ink"}`}
               >
                 <Icon className="h-4 w-4" aria-hidden />
-                <span className="hidden sm:inline">{label}</span>
+                {/* Visually hidden (not display:none) on phones, so screen readers still announce the link. */}
+                <span className="sr-only sm:not-sr-only">{label}</span>
                 {/* Active page: accent bar on the bottom edge of the header */}
                 <span aria-hidden className={`absolute inset-x-2 -bottom-px h-0.5 rounded-full ${active ? "bg-accent" : "bg-transparent"}`} />
               </Link>
@@ -130,6 +131,8 @@ function UserMenu() {
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={`Account menu for ${user.email}`}
+        title={user.email}
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 rounded-full border border-hairline py-1 pl-1 pr-2.5 text-sm hover:bg-surface-2"
       >

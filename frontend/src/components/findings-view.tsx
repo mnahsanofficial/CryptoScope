@@ -1,19 +1,18 @@
 "use client";
 
-import { Search, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { queryString } from "@/lib/api";
 import { formatDate, formatNumber } from "@/lib/format";
 import { useScanEvents } from "@/lib/scan-events-context";
 import type { Finding, FindingCategory, FindingSearchResponse, Paginated, Severity } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
+import { useThrottled } from "@/lib/use-throttled";
 import { useDebounced } from "@/lib/use-debounced";
 import { Highlighted } from "./ui/highlighted";
-import { Card, ErrorNote, Pagination, RiskBadge, Skeleton, tableClasses as t } from "./ui/primitives";
+import { Button, Card, ErrorNote, inputClass, Pagination, RiskBadge, SearchInput, Skeleton, tableClasses as t } from "./ui/primitives";
 
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
 const CATEGORIES: FindingCategory[] = ["certificate", "protocol", "quantum"];
-const inputClass = "rounded-lg border border-hairline bg-page px-3 py-2 text-sm outline-none focus:border-accent";
 
 interface RuleMeta {
   id: string;
@@ -51,6 +50,8 @@ export function FindingsView() {
   const [page, setPage] = useState(1);
   const q = useDebounced(search.trim());
   const searching = q.length > 0;
+  /** Typed text not searched yet (debounce): dim the old rows so they don't pass for the new results. */
+  const pending = search.trim() !== q;
 
   /** Changing a filter always starts again at page 1. */
   const filter = <T,>(set: (value: T) => void) => (value: T) => {
@@ -65,14 +66,23 @@ export function FindingsView() {
   const results = useApi<FindingSearchResponse>(searching ? searchPath : null);
   const active = searching ? results : list;
 
+  // One reload per burst of finished scans (see OverviewView).
+  const finished = useThrottled(finishedCount, 1000);
   const { reload } = active;
   useEffect(() => {
-    if (finishedCount > 0) reload();
-  }, [finishedCount, reload]);
+    if (finished > 0) reload();
+  }, [finished, reload]);
 
   const rows: Row[] = searching ? (results.data?.data ?? []) : (list.data?.data ?? []).map(fromList);
   const meta = searching ? results.data?.meta : list.data?.meta;
   const facets = searching ? results.data?.facets.severity : undefined;
+  // Severity/category are post_filters, so the facet counts include matches those filters hide.
+  const hiddenMatches = facets && meta?.total === 0 ? Object.values(facets).reduce((sum, n) => sum + n, 0) : 0;
+  const showAllMatches = () => {
+    setSeverities([...SEVERITIES]);
+    setCategory("");
+    setPage(1);
+  };
 
   const toggleSeverity = (s: Severity) =>
     filter(setSeverities)(severities.includes(s) ? severities.filter((x) => x !== s) : [...severities, s]);
@@ -86,27 +96,13 @@ export function FindingsView() {
 
       <Card>
         {/* Search: free text over host, title, description and recommendation (Elasticsearch) */}
-        <div className="relative mb-3">
-          <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-muted" />
-          <input
-            type="search"
-            aria-label="Search findings"
-            placeholder="Search by host or text, e.g. zeuz, expired certificate, tls 1.0…"
-            value={search}
-            onChange={(e) => filter(setSearch)(e.target.value)}
-            className={`${inputClass} w-full pl-9 pr-9`}
-          />
-          {search && (
-            <button
-              type="button"
-              aria-label="Clear search"
-              onClick={() => filter(setSearch)("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-ink-muted hover:bg-surface-2 hover:text-ink"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
+        <SearchInput
+          label="Search findings"
+          placeholder="Search host or text, e.g. expired cert…"
+          value={search}
+          onChange={filter(setSearch)}
+          className="mb-3"
+        />
 
         {/* Filters: one row above the table */}
         <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -128,25 +124,25 @@ export function FindingsView() {
               );
             })}
           </div>
-          <select aria-label="Category" value={category} onChange={(e) => filter(setCategory)(e.target.value)} className={inputClass}>
+          <select aria-label="Category" value={category} onChange={(e) => filter(setCategory)(e.target.value)} className={`${inputClass} flex-1 sm:flex-none`}>
             <option value="">All categories</option>
             {CATEGORIES.map((c) => (
               <option key={c} value={c}>{c[0].toUpperCase() + c.slice(1)}</option>
             ))}
           </select>
-          <select aria-label="Rule" value={ruleId} onChange={(e) => filter(setRuleId)(e.target.value)} className={`${inputClass} max-w-64`}>
+          <select aria-label="Rule" value={ruleId} onChange={(e) => filter(setRuleId)(e.target.value)} className={`${inputClass} min-w-0 flex-1 sm:max-w-64 sm:flex-none`}>
             <option value="">All rules</option>
             {rules.data?.rules.map((r) => (
               <option key={r.id} value={r.id}>{r.title}</option>
             ))}
           </select>
           {!searching && (
-            <select aria-label="Sort by" value={sort} onChange={(e) => filter(setSort)(e.target.value)} className={inputClass}>
+            <select aria-label="Sort by" value={sort} onChange={(e) => filter(setSort)(e.target.value)} className={`${inputClass} flex-1 sm:flex-none`}>
               <option value="createdAt">Newest first</option>
               <option value="severity">Most severe first</option>
             </select>
           )}
-          <label className="ml-auto flex items-center gap-2 text-sm text-ink-2">
+          <label className="flex items-center gap-2 text-sm text-ink-2 sm:ml-auto">
             <input type="checkbox" checked={latestOnly} onChange={(e) => filter(setLatestOnly)(e.target.checked)} />
             Current only (latest scan)
           </label>
@@ -154,7 +150,7 @@ export function FindingsView() {
 
         {searching && results.data && (
           <p className="mb-2 text-xs text-ink-muted" aria-live="polite">
-            {formatNumber(results.data.meta.total)} results for “{q}”, best matches first · Elasticsearch, {results.data.took} ms
+            {formatNumber(results.data.meta.total)} {results.data.meta.total === 1 ? "result" : "results"} for “{q}”, best matches first · Elasticsearch, {results.data.took} ms
           </p>
         )}
 
@@ -162,21 +158,27 @@ export function FindingsView() {
         {!active.data && !active.error ? (
           <Skeleton className="h-96" />
         ) : (
-          <div className="overflow-x-auto">
+          <div className={t.wrap}>
             <table className={t.table}>
               <thead>
                 <tr>
                   <th className={t.th}>Severity</th>
                   <th className={t.th}>Finding</th>
-                  <th className={t.th}>Host</th>
-                  <th className={t.th}>Found</th>
+                  <th className={`${t.th} hidden md:table-cell`}>Host</th>
+                  <th className={`${t.th} hidden sm:table-cell`}>Found</th>
                 </tr>
               </thead>
-              <tbody className={active.loading ? "opacity-60" : ""}>
+              <tbody className={`transition-opacity ${active.loading || pending ? "opacity-50" : ""}`}>
                 {rows.map((f) => (
                   <tr key={f.id}>
-                    <td className={`${t.td} whitespace-nowrap`}><RiskBadge level={f.severity} /></td>
-                    <td className={t.td}>
+                    <td className={`${t.tdTop} whitespace-nowrap`}><RiskBadge level={f.severity} /></td>
+                    <td className={t.tdTop}>
+                      {/* On small screens the host (and date) columns are hidden, so they show here instead. */}
+                      <p className="mb-0.5 text-xs text-ink-muted md:hidden">
+                        <Highlighted text={f.host} highlighted={f.highlight?.host} />
+                        {f.port !== 443 && `:${f.port}`}
+                        <span className="whitespace-nowrap sm:hidden"> · {formatDate(f.createdAt)}</span>
+                      </p>
                       <p className="font-medium"><Highlighted text={f.title} highlighted={f.highlight?.title} /></p>
                       <p className="mt-0.5 text-ink-2"><Highlighted text={f.description} highlighted={f.highlight?.description} /></p>
                       <details className="mt-1 text-ink-2">
@@ -184,17 +186,26 @@ export function FindingsView() {
                         <p className="mt-1">{f.recommendation}</p>
                       </details>
                     </td>
-                    <td className={`${t.td} whitespace-nowrap`}>
+                    <td className={`${t.tdTop} hidden whitespace-nowrap md:table-cell`}>
                       <Highlighted text={f.host} highlighted={f.highlight?.host} />
                       {f.port !== 443 && <span className="text-ink-muted">:{f.port}</span>}
                     </td>
-                    <td className={`${t.td} whitespace-nowrap text-ink-2`}>{formatDate(f.createdAt)}</td>
+                    <td className={`${t.tdTop} hidden whitespace-nowrap text-ink-2 sm:table-cell`}>{formatDate(f.createdAt)}</td>
                   </tr>
                 ))}
                 {active.data && rows.length === 0 && (
                   <tr>
-                    <td className={`${t.td} text-ink-2`} colSpan={4}>
+                    <td className={`${t.td} py-6 text-ink-2`} colSpan={4}>
                       {searching ? `No findings match “${q}” with these filters.` : "No findings match these filters."}
+                      {/* Don't leave a dead end when the matches exist but the filters hide them. */}
+                      {hiddenMatches > 0 && (
+                        <span className="mt-2 flex flex-wrap items-center gap-2">
+                          <span>
+                            {formatNumber(hiddenMatches)} {hiddenMatches === 1 ? "match is" : "matches are"} hidden by the severity or category filter.
+                          </span>
+                          <Button variant="secondary" onClick={showAllMatches}>Show all severities</Button>
+                        </span>
+                      )}
                     </td>
                   </tr>
                 )}

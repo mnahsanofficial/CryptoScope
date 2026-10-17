@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { useAuth } from "@/lib/auth-context";
+import { BrandMark } from "./ui/brand";
 import { Button, ErrorNote } from "./ui/primitives";
 
 export function LoginForm() {
@@ -34,9 +35,10 @@ export function LoginForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="w-full max-w-sm rounded-xl border border-hairline bg-surface p-6" noValidate={false}>
-      <h1 className="text-2xl font-semibold tracking-tight">CryptoScope</h1>
-      <p className="mt-1 text-sm text-ink-2">Sign in to your cryptographic inventory.</p>
+    <form onSubmit={onSubmit} className="w-full max-w-sm rounded-xl border border-hairline bg-surface p-6 shadow-sm sm:p-8" noValidate={false}>
+      <BrandMark size="lg" />
+      <h1 className="mt-4 text-2xl font-semibold tracking-tight">Sign in to CryptoScope</h1>
+      <p className="mt-1 text-sm text-ink-2">Your cryptographic inventory and quantum-risk dashboard.</p>
 
       <label className="mt-6 block text-sm font-medium" htmlFor="email">
         Email
