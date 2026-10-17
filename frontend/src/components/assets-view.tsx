@@ -5,22 +5,13 @@ import { apiFetch, queryString } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { timeAgo } from "@/lib/format";
 import { useScanEvents } from "@/lib/scan-events-context";
+import { useDebounced } from "@/lib/use-debounced";
 import type { Asset, Paginated, RiskLevel } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { Button, Card, ErrorNote, Pagination, RiskBadge, Skeleton, tableClasses as t } from "./ui/primitives";
 
 const RISK_LEVELS: RiskLevel[] = ["critical", "high", "medium", "low", "none"];
 const inputClass = "rounded-lg border border-hairline bg-page px-3 py-2 text-sm outline-none focus:border-accent";
-
-/** Waits until the user stops typing before using the value (avoids one request per keystroke). */
-function useDebounced<T>(value: T, ms = 300): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), ms);
-    return () => clearTimeout(timer);
-  }, [value, ms]);
-  return debounced;
-}
 
 export function AssetsView() {
   const { isAdmin } = useAuth();

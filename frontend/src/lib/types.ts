@@ -53,6 +53,31 @@ export interface Finding {
   asset: { id: string; host: string; port: number; label: string | null };
 }
 
+/** One hit from GET /api/findings/search (Elasticsearch). */
+export interface FindingSearchHit {
+  id: string;
+  scanId: string;
+  assetId: string;
+  host: string;
+  port: number;
+  environment: string;
+  ruleId: string;
+  severity: Severity;
+  category: FindingCategory;
+  title: string;
+  description: string;
+  recommendation: string;
+  isCurrent: boolean;
+  createdAt: string;
+  score: number | null;
+  highlight: { title?: string; description?: string; host?: string };
+}
+
+export interface FindingSearchResponse extends Paginated<FindingSearchHit> {
+  took: number;
+  facets: { severity: Partial<Record<Severity, number>>; category: Partial<Record<FindingCategory, number>> };
+}
+
 export interface ExpiringCertificate {
   assetId: string;
   host: string;

@@ -23,7 +23,8 @@
     "db:explain-demo": "ts-node --transpile-only src/database/perf/explain-demo.ts",
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
     "logs:generate": "ts-node --transpile-only src/analytics/generator/generate-handshake-logs.ts",
-    "scans:watch": "ts-node --transpile-only src/cli/watch-scans.ts"
+    "scans:watch": "ts-node --transpile-only src/cli/watch-scans.ts",
+    "findings:reindex": "ts-node --transpile-only src/findings/reindex-findings.ts"
   },
   "jest": {
     "moduleFileExtensions": [
