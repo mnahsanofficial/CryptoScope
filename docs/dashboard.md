@@ -71,6 +71,27 @@ Built with Recharts, following one set of rules:
 - **Dark mode** has its own colour steps. The chart palette was checked for colour-blind separation and contrast
   in both modes with a palette validator (all checks pass).
 
+## UI and UX decisions
+
+Found in a product-design pass over every page (desktop and 375 px phone, light and dark), then fixed:
+
+| Problem | Fix |
+| --- | --- |
+| On a phone the Overview was 460 px wide: tables pushed the grid column wider than the screen | Cards are `min-w-0` and every table sits in a scroll wrapper, so a wide table scrolls inside its card, never the page |
+| On phones the most important columns (risk, score, host) were off-screen | Secondary columns (environment, last scan, host, date) hide below `sm`/`md` and their values move under the main cell |
+| Host names broke mid-label ("cdn.initec / h-2410.ca") | `<HostName>` adds `<wbr>` after `.` and `-`, so names wrap only at label boundaries |
+| A search returning 0 while a severity chip said "Medium 1" was a dead end | The empty state says how many matches the filters hide and offers **Show all severities** |
+| Two clear buttons in search boxes (ours plus the browser's) | The native WebKit cancel button is hidden; one shared `SearchInput` (icon, clear, Esc) is used on every page |
+| Old rows stayed fully visible while a new search was pending | Rows dim while the debounced query catches up and while loading |
+| "Page 1 of 1 · 0 total" and disabled Previous/Next on empty or single-page results | Pagination hides on empty results and shows just the count on a single page |
+| A scan that couldn't reach its host said **Done** | The live panel says **Unreachable** (in red) when the job finished but the scan failed |
+| The scan button invited a second click while a scan was already running | Rows with a queued or running scan show **Scanning…** (disabled) |
+| "Expired 4206 days ago" and "32 min / ago" wrapping in tables | Long spans read as months/years ("Expired 11 years ago", exact days in the tooltip); short cells never wrap |
+| Hours with no traffic were drawn as zero weak handshakes, which reads as "all fixed" | Empty hours are gaps, and a note says where the data stops |
+| On phones the nav links were icons with no accessible name (`display: none` labels) | Labels are visually hidden (`sr-only`), so screen readers still announce them |
+| Every browser tab was titled "CryptoScope"; the 404 was the bare framework page; login had no branding | Per-page titles ("Assets · CryptoScope"), a branded 404 with a way back, and the logo on the sign-in card |
+| Add-asset form had no heading; its checkbox and button didn't line up with the inputs | Titled form with a one-line explanation; controls share the input height |
+
 ## Run and test
 
 ```bash

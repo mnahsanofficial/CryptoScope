@@ -230,9 +230,17 @@ curl -s -X POST localhost:3001/api/auth/login -H 'content-type: application/json
 
 | Overview | Live scan progress |
 | --- | --- |
-| ![Overview: KPI tiles, key-algorithm and weak-handshake charts](docs/screenshots/overview.jpg) | ![Findings page while a batch scan runs, with retries shown live](docs/screenshots/live-scan.jpg) |
-| **Assets** | **Findings** |
-| ![Assets table sorted by risk](docs/screenshots/assets.jpg) | ![Findings filtered to critical and high](docs/screenshots/findings.jpg) |
+| ![Overview: KPI tiles, key-algorithm and weak-handshake charts, with a note where the traffic data stops](docs/screenshots/overview.jpg) | ![Batch scan of three hosts: "Scanning 3" in the navbar, "Scanning…" on each row, per-job progress pushed over Socket.IO](docs/screenshots/live-scan.jpg) |
+| **Assets** (admin) | **Findings search** (Elasticsearch) |
+| ![Assets: add-asset form, search, filters, and the inventory sorted by risk](docs/screenshots/assets.jpg) | ![Typo-tolerant search "globex certifcate expird": highlighted matches and a count on each severity chip](docs/screenshots/findings.jpg) |
+| **Phone** | **Sign in** |
+| ![Findings on a 375 px phone: host and date move under the finding, no sideways scrolling](docs/screenshots/mobile-findings.jpg) | ![Sign-in page](docs/screenshots/login.jpg) |
+
+**UI and UX.** One set of design tokens drives light and dark mode, and every page works at phone width (no
+horizontal page scroll). On phones, secondary table columns fold into the main cell. Severity is always a glyph
+plus a label, never color alone. Empty results explain why and offer a fix ("1 match is hidden by the severity
+filter → Show all severities"). Icon-only navigation keeps accessible names, and each page has its own browser
+title. Details: [docs/dashboard.md](docs/dashboard.md#ui-and-ux-decisions).
 
 ## Data model
 
@@ -294,7 +302,7 @@ One slow query and its fix (an index, **214x faster**, `EXPLAIN ANALYZE` before/
 | --- | --- | --- | --- |
 | Backend unit | `cd backend && npm test` | 240 | Scanner (real local TLS servers), DER parser, every risk rule, mappers, query builders, worker retry policy, scrypt, JWT config, SSRF policy, crypto providers (shared contract tests) |
 | Backend e2e | `cd backend && npm run test:e2e` | 63 | Real app + Postgres + Redis/BullMQ + Elasticsearch + Socket.IO: CRUD, async scans, retries, analytics with exact counts, auth/roles, an audit of every route, rate limits, sign/verify |
-| Frontend | `cd frontend && npm test` | 27 | Live-event reducer, API client, session/JWT expiry, chart helpers, login form, search highlighting |
+| Frontend | `cd frontend && npm test` | 31 | Live-event reducer, API client, session/JWT expiry, chart helpers (ticks, gaps), login form, search highlighting, date/expiry labels, scan status labels |
 
 **CI** (GitHub Actions, [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs, on every push and PR:
 
