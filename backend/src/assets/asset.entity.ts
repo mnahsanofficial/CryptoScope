@@ -11,6 +11,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { RISK_LEVELS, RiskLevel } from '../risk/risk.types';
+import { ScanErrorCode } from '../scanner/scanner.types';
 import { Scan } from '../scans/scan.entity';
 
 export const ENVIRONMENTS = ['production', 'staging', 'development'] as const;
@@ -46,6 +47,13 @@ export class Asset {
 
   @Column({ type: 'timestamptz', nullable: true })
   lastScannedAt: Date | null;
+
+  /**
+   * Why the most recent scan failed (e.g. DNS_NOT_FOUND), or null if it succeeded. A failed scan keeps the
+   * last known risk, so this is how the UI knows that risk is from an earlier scan.
+   */
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  lastScanError: ScanErrorCode | null;
 
   /** Newest successful scan: its findings are the asset's "current" findings. */
   @Column({ type: 'uuid', nullable: true })

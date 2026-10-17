@@ -47,7 +47,7 @@ export class ScansService {
       if (outcome instanceof ScanError) {
         await em.insert(Scan, toFailedScanRow({ id: scanId, assetId, scannedAt, durationMs }, outcome));
         // Keep the last known risk: a timeout doesn't make a host safer or riskier.
-        await em.update(Asset, assetId, { lastScannedAt: scannedAt });
+        await em.update(Asset, assetId, { lastScannedAt: scannedAt, lastScanError: outcome.code });
         return 'recorded';
       }
 
@@ -58,6 +58,7 @@ export class ScansService {
       if (findings.length) await em.insert(Finding, findings);
       await em.update(Asset, assetId, {
         lastScannedAt: scannedAt,
+        lastScanError: null,
         latestRiskScore: risk.score,
         latestRiskLevel: risk.level,
         latestScanId: scanId,
