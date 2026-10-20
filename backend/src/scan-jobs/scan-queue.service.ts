@@ -67,11 +67,15 @@ export class ScanQueueService {
   }
 
   async getJob(jobId: string) {
+    // State FIRST, then the job: BullMQ writes the result and the "completed" state in one atomic step, so a
+    // job loaded after a finished state always has its result. The other order races with the worker: the job
+    // could be loaded unfinished, finish, and then report "completed" with no result and 0 attempts.
+    const state = await this.queue.getJobState(jobId);
     const job = await this.queue.getJob(jobId);
-    if (!job) throw new NotFoundException(`Scan job ${jobId} not found (it may have expired)`);
+    if (!job || state === 'unknown') throw new NotFoundException(`Scan job ${jobId} not found (it may have expired)`);
     return {
       id: job.id,
-      state: await job.getState(),
+      state,
       data: job.data,
       progress: job.progress,
       attemptsMade: job.attemptsMade,
