@@ -26,6 +26,8 @@ export interface Overview {
   quantumVulnerablePercentage: number;
   certificatesExpiringIn30Days: number;
   expiredCertificates: number;
+  /** The same two counts for real hosts only (the totals are mostly seeded demo data). */
+  real: { certificatesExpiringIn30Days: number; expiredCertificates: number };
 }
 
 export interface Asset {
@@ -41,6 +43,8 @@ export interface Asset {
   lastScanError: string | null;
   /** Seeded demo data with a made-up domain: a real scan always ends in "Host not found". */
   synthetic: boolean;
+  /** The newest successful scan (its findings are the asset's current findings). */
+  latestScanId: string | null;
 }
 
 export interface Finding {
@@ -93,6 +97,38 @@ export interface ExpiringCertificate {
   keySize: number | null;
   validTo: string;
   daysLeft: number;
+  synthetic: boolean;
+}
+
+/** GET /api/scans/:id: one scan with its certificate and findings. */
+export interface ScanDetail {
+  id: string;
+  assetId: string;
+  status: "success" | "failed";
+  scannedAt: string;
+  durationMs: number;
+  protocol: string | null;
+  cipher: string | null;
+  keyExchange: string | null;
+  postQuantumKeyExchange: boolean | null;
+  trustAuthorized: boolean | null;
+  trustError: string | null;
+  riskScore: number | null;
+  riskLevel: RiskLevel | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  certificate: {
+    subject: string;
+    issuer: string;
+    keyAlgorithm: string;
+    keySize: number | null;
+    keyCurve: string | null;
+    signatureAlgorithm: string;
+    validFrom: string;
+    validTo: string;
+    selfSigned: boolean;
+  } | null;
+  findings: Array<Pick<Finding, "id" | "ruleId" | "severity" | "category" | "title" | "description" | "recommendation">>;
 }
 
 export interface KeyAlgorithmCounts {

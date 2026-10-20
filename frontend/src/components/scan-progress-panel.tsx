@@ -1,9 +1,11 @@
 "use client";
 
+import { useState } from "react";
 import { useScanEvents } from "@/lib/scan-events-context";
 import { isFinished, overallProgress } from "@/lib/scan-events-reducer";
 import { scanErrorLabel } from "@/lib/scan-errors";
 import type { ScanProgress } from "@/lib/types";
+import { ScanDetailsDialog, type OpenScan } from "./scan-details-dialog";
 import { Button, ProgressBar } from "./ui/primitives";
 
 const STAGE_LABEL: Record<ScanProgress["stage"], string> = {
@@ -29,6 +31,7 @@ export function jobStatus(job: ScanProgress): { label: string; tone: "ok" | "bad
 /** Floating panel with live scan progress pushed over Socket.IO. Hidden when nothing is being tracked. */
 export function ScanProgressPanel() {
   const events = useScanEvents();
+  const [open, setOpen] = useState<OpenScan | null>(null);
   const batches = Object.values(events.batches);
   if (events.jobs.length === 0 && batches.length === 0) return null;
 
@@ -65,14 +68,29 @@ export function ScanProgressPanel() {
       <ul className="max-h-56 space-y-2 overflow-y-auto">
         {events.jobs.slice(0, 8).map((job) => {
           const status = jobStatus(job);
+          const text = job.message ?? (job.stage === "queued" ? "Waiting in queue" : `Scan ${job.jobId.slice(0, 8)}`);
+          const line = (
+            <>
+              <span className="truncate text-ink-2" title={job.message}>{text}</span>
+              <span className={`shrink-0 font-medium ${status.tone === "bad" ? "text-danger" : "text-ink"}`}>{status.label}</span>
+            </>
+          );
+          // A completed job has a saved scan (successful or "unreachable"): its row opens the details.
+          const host = job.message?.split(":")[0] ?? "Scan";
           return (
             <li key={job.jobId} className="text-xs">
-              <div className="mb-1 flex justify-between gap-2">
-                <span className="truncate text-ink-2" title={job.message}>
-                  {job.message ?? (job.stage === "queued" ? "Waiting in queue" : `Scan ${job.jobId.slice(0, 8)}`)}
-                </span>
-                <span className={`shrink-0 font-medium ${status.tone === "bad" ? "text-danger" : "text-ink"}`}>{status.label}</span>
-              </div>
+              {job.stage === "completed" ? (
+                <button
+                  type="button"
+                  onClick={() => setOpen({ scanId: job.scanId, host })}
+                  title="Show findings"
+                  className="-mx-1.5 flex w-[calc(100%+0.75rem)] justify-between gap-2 rounded px-1.5 py-0.5 text-left hover:bg-surface-2"
+                >
+                  {line}
+                </button>
+              ) : (
+                <div className="mb-1 flex justify-between gap-2">{line}</div>
+              )}
               {!isFinished(job) && <ProgressBar percent={job.percent} label={`Scan ${job.jobId}`} />}
             </li>
           );
@@ -80,10 +98,14 @@ export function ScanProgressPanel() {
       </ul>
 
       {allDone && (
-        <Button variant="secondary" className="mt-3 w-full" onClick={events.clearFinished}>
-          Dismiss
-        </Button>
+        <>
+          <p className="mt-2 text-[11px] text-ink-muted">Click a scan to see its findings.</p>
+          <Button variant="secondary" className="mt-2 w-full" onClick={events.clearFinished}>
+            Dismiss
+          </Button>
+        </>
       )}
+      {open && <ScanDetailsDialog scan={open} onClose={() => setOpen(null)} />}
     </aside>
   );
 }
