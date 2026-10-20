@@ -123,10 +123,14 @@ Optional: fill it with realistic data (the dashboard is more interesting with it
 
 ```bash
 cd backend && npm ci
-npm run seed            # 20,000 assets, 100,000 scans, ~200,000 findings (~20 s)
+npm run seed            # 20,000 demo assets, 100,000 scans, ~200,000 findings (~20 s)
 npm run findings:reindex  # copy the seeded findings into the Elasticsearch search index (~7 s)
 npm run logs:generate   # 500,000 TLS handshake logs into Elasticsearch (~5 s)
 ```
+
+The seeded assets are **synthetic**: their domains are made up (`cdn.initech-2410.ca`), so they're marked
+`synthetic` and tagged **Demo** in the UI. Scanning one for real can only end in "Host not found", so they can't be
+selected for scanning, and **Rescan real assets** on the Overview targets only the riskiest real hosts.
 
 | Service | URL |
 | --- | --- |
@@ -191,7 +195,7 @@ curl -s -X POST localhost:3001/api/auth/login -H 'content-type: application/json
 
 | Method | Path | Description |
 | --- | --- | --- |
-| GET / POST | `/api/assets` | List (`search` also accepts URLs or `host:port`, `riskLevel`, `environment`, `sort`, `order`, `page`, `pageSize`) / 🔒 create `{ host, port, label, environment, scanNow }`: queues the first scan unless `scanNow: false` |
+| GET / POST | `/api/assets` | List (`search` also accepts URLs or `host:port`, `riskLevel`, `environment`, `synthetic`, `sort`, `order`, `page`, `pageSize`) / 🔒 create `{ host, port, label, environment, scanNow }`: queues the first scan unless `scanNow: false` |
 | GET / PATCH / DELETE | `/api/assets/:id` | Read / 🔒 update / 🔒 delete (cascades to scans and findings) |
 | POST | `/api/assets/:id/scans` | 🔒 Queue a scan → `202 { jobId, scanId, created }` |
 | POST | `/api/scan-jobs` | 🔒 Queue a batch `{ assetIds }` → `202 { batchId, total, jobs }` |
@@ -301,7 +305,7 @@ One slow query and its fix (an index, **214x faster**, `EXPLAIN ANALYZE` before/
 | Suite | Command | Count | Covers |
 | --- | --- | --- | --- |
 | Backend unit | `cd backend && npm test` | 240 | Scanner (real local TLS servers), DER parser, every risk rule, mappers, query builders, worker retry policy, scrypt, JWT config, SSRF policy, crypto providers (shared contract tests) |
-| Backend e2e | `cd backend && npm run test:e2e` | 63 | Real app + Postgres + Redis/BullMQ + Elasticsearch + Socket.IO: CRUD, async scans, retries, analytics with exact counts, auth/roles, an audit of every route, rate limits, sign/verify |
+| Backend e2e | `cd backend && npm run test:e2e` | 64 | Real app + Postgres + Redis/BullMQ + Elasticsearch + Socket.IO: CRUD, async scans, retries, analytics with exact counts, auth/roles, an audit of every route, rate limits, sign/verify |
 | Frontend | `cd frontend && npm test` | 34 | Live-event reducer, API client, session/JWT expiry, chart helpers (ticks, gaps), login form, search highlighting, date/expiry labels, scan failure labels, reload throttling |
 
 **CI** (GitHub Actions, [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs, on every push and PR:
