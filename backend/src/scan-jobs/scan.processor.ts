@@ -143,6 +143,6 @@ export class ScanProcessor extends WorkerHost implements OnModuleInit {
 
 function summarise(asset: Asset, result: ScanJobResult): string {
   return result.status === 'success'
-    ? `${asset.host}: risk ${result.riskScore} (${result.riskLevel}), ${result.findingsIndexed} findings`
+    ? `${asset.host}: risk ${result.riskScore} (${result.riskLevel}), ${result.findingsIndexed} ${result.findingsIndexed === 1 ? 'finding' : 'findings'}`
     : `${asset.host}: unreachable (${result.errorCode})`;
 }

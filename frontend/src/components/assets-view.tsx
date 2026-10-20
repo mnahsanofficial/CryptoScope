@@ -12,7 +12,7 @@ import type { Asset, Paginated, RiskLevel } from "@/lib/types";
 import { useApi } from "@/lib/use-api";
 import { useThrottled } from "@/lib/use-throttled";
 import { LastScan } from "./ui/last-scan";
-import { Button, Card, ErrorNote, HostName, inputClass, Pagination, RiskBadge, SearchInput, Skeleton, tableClasses as t } from "./ui/primitives";
+import { Button, Card, DEMO_HOST_HINT, DemoTag, ErrorNote, HostName, inputClass, Pagination, RiskBadge, SearchInput, Skeleton, tableClasses as t } from "./ui/primitives";
 
 const RISK_LEVELS: RiskLevel[] = ["critical", "high", "medium", "low", "none"];
 
@@ -22,6 +22,7 @@ export function AssetsView() {
   const [search, setSearch] = useState("");
   const [riskLevel, setRiskLevel] = useState("");
   const [environment, setEnvironment] = useState("");
+  const [source, setSource] = useState(""); // "" all, "false" real hosts, "true" seeded demo hosts
   const [sort, setSort] = useState("riskScore");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -35,7 +36,7 @@ export function AssetsView() {
     setPage(1);
   };
 
-  const path = `/assets${queryString({ search: debouncedSearch, riskLevel, environment, sort, order: sort === "host" ? "asc" : "desc", page, pageSize: 20 })}`;
+  const path = `/assets${queryString({ search: debouncedSearch, riskLevel, environment, synthetic: source, sort, order: sort === "host" ? "asc" : "desc", page, pageSize: 20 })}`;
   const assets = useApi<Paginated<Asset>>(path);
   // One reload per burst of finished scans (see OverviewView).
   const finished = useThrottled(finishedCount, 1000);
@@ -67,7 +68,9 @@ export function AssetsView() {
   const scanning = new Set(jobs.filter((j) => !isFinished(j)).map((j) => j.assetId));
 
   const rows = assets.data?.data ?? [];
-  const allOnPageSelected = rows.length > 0 && rows.every((a) => selected.has(a.id));
+  // Demo hosts can't be scanned for real (made-up domains), so they can't be selected either.
+  const scannable = rows.filter((a) => !a.synthetic);
+  const allOnPageSelected = scannable.length > 0 && scannable.every((a) => selected.has(a.id));
   const toggle = (id: string) =>
     setSelected((current) => {
       const next = new Set(current);
@@ -78,7 +81,7 @@ export function AssetsView() {
   const togglePage = () =>
     setSelected((current) => {
       const next = new Set(current);
-      rows.forEach((a) => (allOnPageSelected ? next.delete(a.id) : next.add(a.id)));
+      scannable.forEach((a) => (allOnPageSelected ? next.delete(a.id) : next.add(a.id)));
       return next;
     });
 
@@ -114,6 +117,11 @@ export function AssetsView() {
             <option value="staging">Staging</option>
             <option value="development">Development</option>
           </select>
+          <select aria-label="Source" value={source} onChange={(e) => filter(setSource)(e.target.value)} className={`${inputClass} flex-1 sm:flex-none`}>
+            <option value="">All hosts</option>
+            <option value="false">Real hosts</option>
+            <option value="true">Demo data</option>
+          </select>
           <select aria-label="Sort by" value={sort} onChange={(e) => filter(setSort)(e.target.value)} className={`${inputClass} flex-1 sm:flex-none`}>
             <option value="riskScore">Highest risk first</option>
             <option value="lastScannedAt">Recently scanned</option>
@@ -131,7 +139,7 @@ export function AssetsView() {
                 <tr>
                   {isAdmin && (
                     <th className={`${t.th} w-8`}>
-                      <input type="checkbox" aria-label="Select all on this page" checked={allOnPageSelected} onChange={togglePage} />
+                      <input type="checkbox" aria-label="Select all real hosts on this page" checked={allOnPageSelected} onChange={togglePage} disabled={scannable.length === 0} />
                     </th>
                   )}
                   <th className={t.th}>Host</th>
@@ -148,12 +156,20 @@ export function AssetsView() {
                   <tr key={a.id}>
                     {isAdmin && (
                       <td className={t.td}>
-                        <input type="checkbox" aria-label={`Select ${a.host}`} checked={selected.has(a.id)} onChange={() => toggle(a.id)} />
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${a.host}`}
+                          checked={selected.has(a.id)}
+                          onChange={() => toggle(a.id)}
+                          disabled={a.synthetic}
+                          title={a.synthetic ? DEMO_HOST_HINT : undefined}
+                        />
                       </td>
                     )}
                     <td className={t.td}>
                       <span className="font-medium"><HostName host={a.host} /></span>
                       {a.port !== 443 && <span className="text-ink-muted">:{a.port}</span>}
+                      {a.synthetic && <DemoTag />}
                       {a.label && <span className="block text-xs text-ink-muted">{a.label}</span>}
                       {/* Columns hidden on small screens move under the host. */}
                       <span className="block text-xs text-ink-muted md:hidden">
@@ -168,7 +184,13 @@ export function AssetsView() {
                     <td className={`${t.td} hidden whitespace-nowrap text-ink-2 sm:table-cell`}><LastScan at={a.lastScannedAt} error={a.lastScanError} /></td>
                     {isAdmin && (
                       <td className={`${t.td} hidden text-right sm:table-cell`}>
-                        <Button variant="ghost" className="whitespace-nowrap" onClick={() => scanOne(a.id)} disabled={scanning.has(a.id)}>
+                        <Button
+                          variant="ghost"
+                          className="whitespace-nowrap"
+                          onClick={() => scanOne(a.id)}
+                          disabled={scanning.has(a.id) || a.synthetic}
+                          title={a.synthetic ? DEMO_HOST_HINT : undefined}
+                        >
                           {scanning.has(a.id) ? "Scanning…" : "Scan"}
                         </Button>
                       </td>

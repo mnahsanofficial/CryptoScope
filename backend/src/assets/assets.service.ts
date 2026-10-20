@@ -45,6 +45,9 @@ export class AssetsService {
     if (query.environment) {
       qb.andWhere('asset.environment = :environment', { environment: query.environment });
     }
+    if (query.synthetic !== undefined) {
+      qb.andWhere('asset.synthetic = :synthetic', { synthetic: query.synthetic });
+    }
 
     const [data, total] = await qb
       .orderBy(SORT_COLUMNS[query.sort], query.order === 'asc' ? 'ASC' : 'DESC', 'NULLS LAST')

@@ -78,6 +78,27 @@ describe('CryptoScope API (e2e)', () => {
       expect(byHostPort.body.data.map((a: { port: number }) => a.port)).toEqual([8443]);
     });
 
+    it('separates seeded demo hosts (synthetic) from real ones; the API never lets a client set the flag', async () => {
+      const real = await createAsset({ host: 'real-host.example' });
+      const demo = await createAsset({ host: 'cdn.initech-2410.ca' });
+      expect(real.synthetic).toBe(false); // the default for anything added through the API
+      await api().post('/api/assets').send({ host: 'x.example', synthetic: true }).expect(400); // unknown field
+
+      // The migration's backfill expression: only the seed's exact host pattern counts as synthetic.
+      await db.query(`UPDATE assets SET synthetic = true WHERE id = $1`, [demo.id]);
+      const [{ seedLike, realLike }] = await db.query(`
+        SELECT 'cdn.initech-2410.ca' ~ $1 AS "seedLike", 'cdn.initech.example.com' ~ $1 AS "realLike"`,
+        ['^(www|api|auth|vpn|mail|portal|payments|cdn|admin|sso|gateway|app)\\.(northwind|contoso|fabrikam|initech|umbrella|globex|acme|wayne|stark|hooli)-[0-9]+\\.(com|net|io|org|ca|co\\.uk)$']);
+      expect({ seedLike, realLike }).toEqual({ seedLike: true, realLike: false });
+
+      const hosts = async (query: string) =>
+        (await api().get(`/api/assets?${query}`).expect(200)).body.data.map((a: { host: string }) => a.host);
+      expect(await hosts('synthetic=false')).toEqual(['real-host.example']);
+      expect(await hosts('synthetic=true')).toEqual(['cdn.initech-2410.ca']);
+      expect(await hosts('sort=host&order=asc')).toEqual(['cdn.initech-2410.ca', 'real-host.example']);
+      await api().get('/api/assets?synthetic=maybe').expect(400);
+    });
+
     it('treats LIKE wildcards in search literally', async () => {
       await createAsset({ host: 'shop.com' });
       const res = await api().get('/api/assets?search=%25').expect(200); // "%" must not match everything
