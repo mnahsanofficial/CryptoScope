@@ -12,13 +12,18 @@ import { useApi } from "@/lib/use-api";
 import { useThrottled } from "@/lib/use-throttled";
 import { KeyAlgorithmChart, WeakHandshakesChart } from "./charts";
 import { LastScan } from "./ui/last-scan";
-import { Button, Card, ErrorNote, RiskBadge, Skeleton, StatTile, tableClasses as t } from "./ui/primitives";
+import { Button, Card, DemoTag, ErrorNote, RiskBadge, Skeleton, StatTile, tableClasses as t } from "./ui/primitives";
 
 export function OverviewView() {
   const { isAdmin } = useAuth();
   const { finishedCount, jobs } = useScanEvents();
   const overview = useApi<Overview>("/dashboard/overview");
   const riskiest = useApi<Paginated<Asset>>("/assets?sort=riskScore&order=desc&pageSize=8");
+  // What "Rescan" targets: the riskiest REAL assets with a known risk. Seeded demo hosts have made-up domains and
+  // would all fail; assets never scanned successfully have no risk to rank by.
+  const rescanTargets = useApi<Paginated<Asset>>(
+    "/assets?synthetic=false&riskLevel=critical,high,medium,low,none&sort=riskScore&order=desc&pageSize=8",
+  );
   const expiring = useApi<Paginated<ExpiringCertificate>>("/certificates/expiring?pageSize=8");
   const algorithms = useApi<KeyAlgorithmCounts>("/analytics/handshakes/key-algorithms");
   const weak = useApi<WeakPerInterval>("/analytics/handshakes/weak-per-interval?interval=1h");
@@ -32,22 +37,24 @@ export function OverviewView() {
   const { reload: reloadOverview } = overview;
   const { reload: reloadRiskiest } = riskiest;
   const { reload: reloadExpiring } = expiring;
+  const { reload: reloadTargets } = rescanTargets;
   useEffect(() => {
     if (finished === 0) return;
     reloadOverview();
     reloadRiskiest();
     reloadExpiring();
-  }, [finished, reloadOverview, reloadRiskiest, reloadExpiring]);
+    reloadTargets();
+  }, [finished, reloadOverview, reloadRiskiest, reloadExpiring, reloadTargets]);
 
-  const riskiestIds = riskiest.data?.data.map((a) => a.id) ?? [];
+  const targetIds = rescanTargets.data?.data.map((a) => a.id) ?? [];
   // While these assets are still being scanned, a second click would only queue a duplicate batch.
-  const rescanning = starting || jobs.some((j) => !isFinished(j) && riskiestIds.includes(j.assetId));
+  const rescanning = starting || jobs.some((j) => !isFinished(j) && targetIds.includes(j.assetId));
 
   async function scanRiskiest() {
     setScanError(null);
     setStarting(true);
     try {
-      await apiFetch("/scan-jobs", { method: "POST", body: { assetIds: riskiestIds } });
+      await apiFetch("/scan-jobs", { method: "POST", body: { assetIds: targetIds } });
     } catch (err) {
       setScanError(err instanceof Error ? err.message : "Could not start scans");
     } finally {
@@ -64,8 +71,12 @@ export function OverviewView() {
           <p className="text-sm text-ink-2">Current state: each asset&apos;s latest scan, plus the last 7 days of TLS traffic.</p>
         </div>
         {isAdmin && (
-          <Button onClick={scanRiskiest} disabled={riskiestIds.length === 0 || rescanning}>
-            {rescanning ? "Rescanning…" : `Rescan riskiest ${riskiestIds.length || ""}`}
+          <Button
+            onClick={scanRiskiest}
+            disabled={targetIds.length === 0 || rescanning}
+            title={`Rescans the ${targetIds.length} riskiest real assets. Seeded demo hosts are skipped: their domains don't exist.`}
+          >
+            {rescanning ? "Rescanning…" : `Rescan real assets (${targetIds.length})`}
           </Button>
         )}
       </div>
@@ -125,7 +136,13 @@ export function OverviewView() {
                 <tbody>
                   {riskiest.data?.data.map((a) => (
                     <tr key={a.id}>
-                      <td className={t.td}><span className="block max-w-[10rem] truncate sm:max-w-[16rem] lg:max-w-[9rem] xl:max-w-[13rem]" title={`${a.host}:${a.port}`}>{a.host}</span></td>
+                      <td className={t.td}>
+                        {/* The tag sits outside the truncated name, so a long host can't cut it off. */}
+                        <span className="flex items-center">
+                          <span className="block max-w-[8rem] truncate sm:max-w-[14rem] lg:max-w-[7rem] xl:max-w-[11rem]" title={`${a.host}:${a.port}`}>{a.host}</span>
+                          {a.synthetic && <DemoTag />}
+                        </span>
+                      </td>
                       <td className={`${t.td} whitespace-nowrap`}><RiskBadge level={a.latestRiskLevel} /></td>
                       <td className={`${t.td} tabular text-right`}>{a.latestRiskScore ?? "–"}</td>
                       <td className={`${t.td} whitespace-nowrap text-ink-2`}><LastScan at={a.lastScannedAt} error={a.lastScanError} /></td>

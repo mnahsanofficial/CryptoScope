@@ -144,6 +144,16 @@ export const tableClasses = {
   tdTop: "border-b border-hairline px-2 py-2.5 align-top sm:px-3",
 };
 
+/** Small tag for seeded demo hosts, whose domains are made up and can't be scanned for real. */
+export const DEMO_HOST_HINT = "Seeded demo data: this domain is made up, so a real scan ends in Host not found.";
+export function DemoTag() {
+  return (
+    <span title={DEMO_HOST_HINT} className="ml-1.5 shrink-0 rounded bg-surface-2 px-1.5 py-0.5 align-middle text-[10px] font-medium uppercase tracking-wide text-ink-muted">
+      Demo
+    </span>
+  );
+}
+
 /** A host name that may wrap only after "." or "-" (cdn.initech-2410.ca), never in the middle of a label. */
 export function HostName({ host }: { host: string }) {
   const parts = host.split(/(?<=[.-])/);

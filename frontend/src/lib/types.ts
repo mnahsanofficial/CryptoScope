@@ -39,6 +39,8 @@ export interface Asset {
   lastScannedAt: string | null;
   /** Why the most recent scan failed (e.g. "DNS_NOT_FOUND"); null when it succeeded. */
   lastScanError: string | null;
+  /** Seeded demo data with a made-up domain: a real scan always ends in "Host not found". */
+  synthetic: boolean;
 }
 
 export interface Finding {
