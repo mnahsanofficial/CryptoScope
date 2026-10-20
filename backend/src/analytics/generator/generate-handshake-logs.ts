@@ -40,7 +40,10 @@ async function currentIndicesBehind(client: Client, alias: string): Promise<stri
   return Object.keys(await client.indices.getAlias({ name: alias }));
 }
 
-/** Best effort: creates a Kibana data view so the logs can be explored in Discover right away. */
+/**
+ * Best effort: creates a Kibana data view so the logs can be explored in Discover right away, and makes
+ * Discover (with this data view) the page Kibana opens on, instead of the generic "Welcome home".
+ */
 async function ensureKibanaDataView(alias: string): Promise<void> {
   const kibana = process.env.KIBANA_URL ?? `http://localhost:${process.env.KIBANA_PORT ?? 5601}`;
   try {
@@ -53,7 +56,24 @@ async function ensureKibanaDataView(alias: string): Promise<void> {
       }),
       signal: AbortSignal.timeout(5_000),
     });
-    console.log(res.ok ? `  Kibana data view "${alias}" ready at ${kibana}/app/discover` : `  Kibana data view skipped (HTTP ${res.status})`);
+    if (!res.ok) {
+      console.log(`  Kibana data view skipped (HTTP ${res.status})`);
+      return;
+    }
+    await fetch(`${kibana}/api/kibana/settings`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'kbn-xsrf': 'true' },
+      // The logs cover the last 7 days; Kibana's default of 15 minutes would look empty.
+      body: JSON.stringify({
+        changes: {
+          defaultRoute: '/app/discover',
+          defaultIndex: alias,
+          'timepicker:timeDefaults': JSON.stringify({ from: 'now-7d', to: 'now' }),
+        },
+      }),
+      signal: AbortSignal.timeout(5_000),
+    });
+    console.log(`  Kibana data view "${alias}" ready at ${kibana} (opens on Discover)`);
   } catch {
     console.log('  Kibana not reachable, data view skipped');
   }
