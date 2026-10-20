@@ -211,6 +211,7 @@ function generateAsset(index: number, now: Date, batch: Batch): void {
     latestScanId: null, // set after the scans are inserted (the foreign key needs them to exist)
     lastScannedAt,
     lastScanError,
+    synthetic: true, // made-up domain: labelled in the UI and skipped by "Rescan riskiest"
     createdAt: new Date(firstScanAt.getTime() - DAY_MS),
   });
 }

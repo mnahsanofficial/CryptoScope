@@ -1,6 +1,7 @@
 import { OmitType, PartialType } from '@nestjs/mapped-types';
 import { IsBoolean, IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 import { CommaSeparated, PaginationQueryDto } from '../../common/pagination';
+import { BooleanFromQuery } from '../../dashboard/dashboard.dto';
 import { RISK_LEVELS, RiskLevel } from '../../risk/risk.types';
 import { Environment, ENVIRONMENTS } from '../asset.entity';
 
@@ -51,6 +52,12 @@ export class ListAssetsQueryDto extends PaginationQueryDto {
   @IsOptional()
   @IsIn(ENVIRONMENTS)
   environment?: Environment;
+
+  /** false = real hosts only, true = seeded demo hosts only, absent = both. */
+  @IsOptional()
+  @BooleanFromQuery()
+  @IsBoolean()
+  synthetic?: boolean;
 
   @IsOptional()
   @IsIn(ASSET_SORT_FIELDS)

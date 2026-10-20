@@ -22,6 +22,7 @@ export type Environment = (typeof ENVIRONMENTS)[number];
 @Unique('uq_assets_host_port', ['host', 'port'])
 @Index('idx_assets_latest_risk_score', ['latestRiskScore'])
 @Index('idx_assets_latest_scan_id', ['latestScanId'])
+@Index('idx_assets_real_latest_risk_score', ['latestRiskScore'], { where: 'NOT "synthetic"' })
 export class Asset {
   @PrimaryGeneratedColumn('uuid', { primaryKeyConstraintName: 'pk_assets' })
   id: string;
@@ -54,6 +55,13 @@ export class Asset {
    */
   @Column({ type: 'varchar', length: 32, nullable: true })
   lastScanError: ScanErrorCode | null;
+
+  /**
+   * Seeded demo data with a made-up domain (set by `npm run seed`, never through the API). Scanning one for
+   * real always ends in DNS_NOT_FOUND, so the UI labels these and "Rescan riskiest" skips them.
+   */
+  @Column({ type: 'boolean', default: false })
+  synthetic: boolean;
 
   /** Newest successful scan: its findings are the asset's "current" findings. */
   @Column({ type: 'uuid', nullable: true })
