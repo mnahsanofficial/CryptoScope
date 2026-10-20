@@ -20,6 +20,7 @@
     "migration:revert": "npm run typeorm -- migration:revert",
     "migration:show": "npm run typeorm -- migration:show",
     "seed": "ts-node --transpile-only src/database/seed/seed.ts",
+    "seed:real": "ts-node --transpile-only src/database/seed/seed-real.ts",
     "db:explain-demo": "ts-node --transpile-only src/database/perf/explain-demo.ts",
     "test:e2e": "jest --config ./test/jest-e2e.json --runInBand",
     "logs:generate": "ts-node --transpile-only src/analytics/generator/generate-handshake-logs.ts",
