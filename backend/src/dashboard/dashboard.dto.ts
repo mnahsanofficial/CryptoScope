@@ -21,6 +21,12 @@ export class ExpiringCertificatesQueryDto extends PaginationQueryDto {
   @IsBoolean()
   includeExpired: boolean = true;
 
+  /** false = real hosts only, true = seeded demo hosts only, absent = both. */
+  @IsOptional()
+  @BooleanFromQuery()
+  @IsBoolean()
+  synthetic?: boolean;
+
   /** Soonest expiry first by default: that's the most urgent. */
   @IsOptional()
   @IsIn(['asc', 'desc'])

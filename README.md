@@ -209,8 +209,8 @@ curl -s -X POST localhost:3001/api/auth/login -H 'content-type: application/json
 | GET | `/api/assets/:id/scans`, `/api/scans/:id` | Scan history; one scan with certificate and findings |
 | GET | `/api/findings` | Filters `severity`, `category`, `ruleId`, `assetId`, `from`, `to`, `latestOnly`; sort `createdAt` or `severity`; paginated |
 | GET | `/api/findings/search` | Elasticsearch full-text search: `q` (typo-tolerant, prefix, host + text) plus `severity`, `category`, `ruleId`, `currentOnly`; ranked, highlighted, with severity/category counts |
-| GET | `/api/certificates/expiring` | Certificates in use expiring within `days` (default 30), most urgent first |
-| GET | `/api/dashboard/overview` | Totals, average risk, current findings, % quantum-vulnerable, expiring certificates |
+| GET | `/api/certificates/expiring` | Certificates in use expiring within `days` (default 30), most urgent first; `synthetic=false` for real hosts only |
+| GET | `/api/dashboard/overview` | Totals, average risk, current findings, % quantum-vulnerable, expiring certificates (also counted for real hosts alone) |
 | POST | `/api/scanner/scan` | 🔒 Ad-hoc scan of up to 50 targets, with risk assessments (not stored) |
 | GET | `/api/scanner/seed-targets`, `/api/risk/rules` | Demo targets; risk rules and weights |
 
@@ -312,7 +312,7 @@ One slow query and its fix (an index, **214x faster**, `EXPLAIN ANALYZE` before/
 | --- | --- | --- | --- |
 | Backend unit | `cd backend && npm test` | 242 | Scanner (real local TLS servers), DER parser, every risk rule, mappers, query builders, worker retry policy, scrypt, JWT config, SSRF policy, crypto providers (shared contract tests) |
 | Backend e2e | `cd backend && npm run test:e2e` | 64 | Real app + Postgres + Redis/BullMQ + Elasticsearch + Socket.IO: CRUD, async scans, retries, analytics with exact counts, auth/roles, an audit of every route, rate limits, sign/verify |
-| Frontend | `cd frontend && npm test` | 34 | Live-event reducer, API client, session/JWT expiry, chart helpers (ticks, gaps), login form, search highlighting, date/expiry labels, scan failure labels, reload throttling |
+| Frontend | `cd frontend && npm test` | 37 | Live-event reducer, API client, session/JWT expiry, chart helpers (ticks, gaps), login form, search highlighting, date/expiry labels, scan failure labels, reload throttling |
 
 **CI** (GitHub Actions, [`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs, on every push and PR:
 
