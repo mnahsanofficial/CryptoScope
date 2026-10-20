@@ -17,6 +17,8 @@ export interface Overview {
   quantumVulnerablePercentage: number;
   certificatesExpiringIn30Days: number;
   expiredCertificates: number;
+  /** The same two counts for real hosts only (the totals are mostly seeded demo data). */
+  real: { certificatesExpiringIn30Days: number; expiredCertificates: number };
 }
 
 export interface ExpiringCertificate {
@@ -30,7 +32,12 @@ export interface ExpiringCertificate {
   keySize: number | null;
   validTo: string;
   daysLeft: number;
+  /** Seeded demo host (made-up domain). */
+  synthetic: boolean;
 }
+
+const SOON = `c.valid_to > now() AND c.valid_to <= now() + interval '30 days'`;
+const EXPIRED = 'c.valid_to <= now()';
 
 /** "Current" data = each asset's newest successful scan, reached through assets.latest_scan_id. */
 const CURRENT_FINDINGS = 'findings f JOIN assets a ON a.latest_scan_id = f.scan_id';
@@ -56,8 +63,10 @@ export class DashboardService {
       this.db.query(`SELECT COUNT(DISTINCT f.asset_id)::int AS count FROM ${CURRENT_FINDINGS}
                      WHERE f.rule_id = 'QUANTUM_VULNERABLE_KEY'`),
       this.db.query(`
-        SELECT COUNT(*) FILTER (WHERE c.valid_to > now() AND c.valid_to <= now() + interval '30 days')::int AS expiring,
-               COUNT(*) FILTER (WHERE c.valid_to <= now())::int AS expired
+        SELECT COUNT(*) FILTER (WHERE ${SOON})::int AS expiring,
+               COUNT(*) FILTER (WHERE ${EXPIRED})::int AS expired,
+               COUNT(*) FILTER (WHERE ${SOON} AND NOT a.synthetic)::int AS real_expiring,
+               COUNT(*) FILTER (WHERE ${EXPIRED} AND NOT a.synthetic)::int AS real_expired
         FROM ${CURRENT_CERTIFICATES}`),
     ]);
 
@@ -72,18 +81,22 @@ export class DashboardService {
       quantumVulnerablePercentage: percentage(quantum[0].count, scanned),
       certificatesExpiringIn30Days: certificates[0].expiring,
       expiredCertificates: certificates[0].expired,
+      real: { certificatesExpiringIn30Days: certificates[0].real_expiring, expiredCertificates: certificates[0].real_expired },
     };
   }
 
   /** Certificates currently in use (latest scan per asset) that expire soon, most urgent first. */
   async expiringCertificates(query: ExpiringCertificatesQueryDto): Promise<Paginated<ExpiringCertificate>> {
-    const where = query.includeExpired
-      ? `c.valid_to <= now() + make_interval(days => $1)`
-      : `c.valid_to > now() AND c.valid_to <= now() + make_interval(days => $1)`;
+    const conditions = [
+      query.includeExpired ? `c.valid_to <= now() + make_interval(days => $1)` : `c.valid_to > now() AND c.valid_to <= now() + make_interval(days => $1)`,
+    ];
+    // Only ever one of two fixed SQL fragments: no user input reaches the query text.
+    if (query.synthetic !== undefined) conditions.push(query.synthetic ? 'a.synthetic' : 'NOT a.synthetic');
+    const where = conditions.join(' AND ');
 
     const [rows, [{ total }]] = await Promise.all([
       this.db.query(
-        `SELECT a.id AS "assetId", a.host, a.port, a.environment, c.subject, c.issuer,
+        `SELECT a.id AS "assetId", a.host, a.port, a.environment, a.synthetic, c.subject, c.issuer,
                 c.key_algorithm AS "keyAlgorithm", c.key_size AS "keySize", c.valid_to AS "validTo",
                 FLOOR(EXTRACT(EPOCH FROM (c.valid_to - now())) / 86400)::int AS "daysLeft"
          FROM ${CURRENT_CERTIFICATES}

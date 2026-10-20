@@ -198,6 +198,14 @@ describe('CryptoScope API (e2e)', () => {
       const narrow = await api().get('/api/certificates/expiring?days=3').expect(200);
       expect(narrow.body.meta.total).toBe(0);
 
+      // Real vs seeded demo hosts: the row says which, the filter picks one, the overview counts real ones apart.
+      expect(soon.body.data[0].synthetic).toBe(false);
+      expect((await api().get('/api/certificates/expiring?synthetic=false').expect(200)).body.meta.total).toBe(1);
+      expect((await api().get('/api/certificates/expiring?synthetic=true').expect(200)).body.meta.total).toBe(0);
+      expect((await api().get('/api/dashboard/overview').expect(200)).body.real).toEqual({ certificatesExpiringIn30Days: 1, expiredCertificates: 0 });
+      await db.query(`UPDATE assets SET synthetic = true WHERE id = $1`, [asset.id]);
+      expect((await api().get('/api/dashboard/overview').expect(200)).body.real).toEqual({ certificatesExpiringIn30Days: 0, expiredCertificates: 0 });
+
       await api().get('/api/certificates/expiring?days=1000').expect(400);
     });
 
