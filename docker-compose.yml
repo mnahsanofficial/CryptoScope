@@ -59,6 +59,11 @@ services:
     image: docker.elastic.co/kibana/kibana:8.19.23
     environment:
       ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+      # Local development only: security is off on purpose (see docs/security.md), so hide the
+      # "Your data is not secure" pop-up, and opt out of usage collection (hides its banner too).
+      SECURITY_SHOWINSECURECLUSTERWARNING: "false"
+      TELEMETRY_OPTIN: "false"
+      TELEMETRY_ALLOWCHANGINGOPTINSTATUS: "false"
     ports:
       - "${KIBANA_PORT:-5601}:5601"
     depends_on:
